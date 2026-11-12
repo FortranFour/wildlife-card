@@ -121,9 +121,9 @@
     .row .lab.on { color:var(--primary-color); font-weight:700; }
     .row .tot { font-size:11px; text-align:right; color:var(--secondary-text-color); font-variant-numeric:tabular-nums; }
     .cells { display:grid; grid-auto-flow:column; grid-auto-columns:minmax(0,1fr); gap:2px; }
-    .c { height:var(--ch,16px); border-radius:3px; background:rgba(var(--wl-ink),.05); }
+    .c { position:relative; height:var(--ch,16px); border-radius:3px; background:rgba(var(--wl-ink),.05); }
     .c[data-v] { background:rgba(var(--wl-rgb),var(--a)); }
-    .c.wk { margin-left:2px; }
+    .c.wk::before { content:''; position:absolute; top:0; bottom:0; left:-2px; width:1px; background:rgba(var(--wl-ink),.2); }
     .c.sel { outline:2px solid var(--primary-text-color); outline-offset:1px; }
     .c:hover { outline:2px solid rgba(var(--wl-ink),.55); outline-offset:1px; }
     .rows { display:grid; gap:2px; }

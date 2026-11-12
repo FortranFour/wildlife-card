@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.1 — 2026-11-12
+
+- **Every Monday column was narrower than the rest.** The weekly marker was a left margin on the cell, so it took its 2px out of the cell rather than the gap — 5px against 7px on a 30-day phone view, which is a third narrower and plainly visible. The marker is now a hairline drawn in the gap and all columns are identical. The tests measure them.
+
 ## 1.1.0 — 2026-11-12
 
 - **Day/night shading on the time-of-day rows.** A faint strip beside the time labels and a wash behind the cells show at a glance whether a sighting was in daylight, darkness, dawn or dusk. Every column uses its own date, so across a 30-day range you can watch the nights draw in.

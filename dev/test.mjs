@@ -182,6 +182,9 @@ const shot = async (page, name) => {
   const page = await open("", 820);
   await page.click$('[data-act="days"][data-v="30"]');
   check((await page.$$c(".row .cells .c")).length / 8 === 30, "30-day range draws thirty columns");
+  const widths = await page.$$eval("wildlife-card .rows .row:first-child .c",
+    (cs) => [...new Set(cs.map((c) => Math.round(c.getBoundingClientRect().width * 10)))]);
+  check(widths.length === 1, `every column is the same width (${widths.map((w) => w / 10).join(", ")}px)`);
   check(await page.$eval("wildlife-card", (e) => e.hasAttribute("wide")), "wide layout switches on past 640px");
   await shot(page, "overview-wide.png");
   check(page.errors.length === 0, `wide layout renders without errors (${page.errors.slice(0, 2).join("; ")})`);
