@@ -7,7 +7,7 @@ A Home Assistant dashboard card for the animals your [Frigate](https://frigate.v
 *Fourteen days on a working installation. The Cats tile is selected, so the grid and the browser below it show cats only.*
 
 - **A headline that reads the trend, not the last event.** Which animals are running above or below their own usual rate over the last three days, the numbers behind it, where and when rodents concentrate, and whether cat activity tracks rodent activity day to day.
-- **One tile per species**, each showing the best-scoring recent picture, a count for the period and how long ago the last sighting was. Tap a tile to filter everything below it.
+- **One tile per species**, each showing the best-scoring recent picture, a count for the period and how long ago the last sighting was. Tap one and the sightings browser shows that species alone — and so does the grid, once you switch it to Time or Location.
 - **An activity grid** of days across by species, two-hour block, or camera — so a spate, a nightly pattern or one bad corner of the property stands out. Tap any cell to see just those sightings.
 - **A sightings browser**: a filmstrip newest-first, a full snapshot with previous/next, and the clip for any sighting that has one.
 - **A confidence filter**, tucked behind the tune icon, to screen out the misclassifications every model produces.
