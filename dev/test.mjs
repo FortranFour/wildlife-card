@@ -1,7 +1,7 @@
 // Headless-Chromium harness: renders the built card against generated events,
 // asserts the interactive parts work, and writes screenshots to dev/out/.
 //   node dev/test.mjs          run the checks
-//   node dev/test.mjs --docs   also refresh the README images in docs/
+//   node dev/test.mjs --docs   also refresh the demo images in docs/demo/
 import { chromium } from "playwright";
 import http from "node:http";
 import fs from "node:fs";
@@ -135,9 +135,11 @@ await browser.close();
 server.close();
 
 if (DOCS) {
-  fs.mkdirSync(path.join(ROOT, "docs"), { recursive: true });
-  for (const f of fs.readdirSync(OUT)) fs.copyFileSync(path.join(OUT, f), path.join(ROOT, "docs", f));
-  console.log("docs/ refreshed");
+  // docs/demo/ only: docs/ itself holds screenshots from a real installation.
+  const dir = path.join(ROOT, "docs/demo");
+  fs.mkdirSync(dir, { recursive: true });
+  for (const f of fs.readdirSync(OUT)) fs.copyFileSync(path.join(OUT, f), path.join(dir, f));
+  console.log("docs/demo/ refreshed");
 }
 console.log(failures.length ? `\n${failures.length} check(s) failed` : `\nall checks passed — screenshots in dev/out/`);
 process.exit(failures.length ? 1 : 0);
