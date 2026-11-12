@@ -1,0 +1,6 @@
+{
+  "name": "Wildlife Card",
+  "render_readme": true,
+  "filename": "wildlife-card.js",
+  "homeassistant": "2024.8.0"
+}

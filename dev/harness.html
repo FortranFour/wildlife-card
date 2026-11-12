@@ -1,0 +1,144 @@
+<!doctype html>
+<!--
+  Offline harness: renders the built card against generated Frigate events, with
+  no Home Assistant and no real footage. Run `node dev/test.mjs`, or serve the
+  repo root and open /dev/harness.html.
+
+  Query string: ?w=430 card width · ?dark=1 dark theme · ?seed=7 data seed
+                ?quiet=1 no coyote pack in the data
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>wildlife-card harness</title>
+<style>
+  html {
+    --primary-color: #03a9f4; --rgb-primary-color: 3,169,244;
+    --primary-text-color: #212121; --rgb-primary-text-color: 33,33,33;
+    --secondary-text-color: #727272; --card-background-color: #fff;
+    --text-primary-color: #fff; --rgb-warning-color: 255,166,0; --rgb-error-color: 219,68,55;
+    font-family: Roboto, system-ui, Arial, sans-serif;
+  }
+  html.dark {
+    --primary-text-color: #e1e1e1; --rgb-primary-text-color: 225,225,225;
+    --secondary-text-color: #9b9b9b; --card-background-color: #1c1c1c;
+  }
+  body { margin: 16px; background: #f6f7f9; }
+  html.dark body { background: #111214; }
+  ha-card { display: block; background: var(--card-background-color); box-shadow: 0 1px 3px rgba(0,0,0,.15); }
+  #host { margin: 0 auto; }
+</style>
+</head>
+<body>
+<div id="host"></div>
+<script type="module">
+customElements.define('ha-card', class extends HTMLElement {});
+// Home Assistant supplies the real MDI icon; the harness draws a plain dot.
+customElements.define('ha-icon', class extends HTMLElement {
+  connectedCallback() { this.textContent = '\u25cf'; this.style.fontSize = '20px'; }
+});
+
+const q = new URLSearchParams(location.search);
+if (q.get('dark')) document.documentElement.classList.add('dark');
+document.getElementById('host').style.width = `${q.get('w') || 430}px`;
+
+/* ---- deterministic pseudo-random data ------------------------------------ */
+let seed = +(q.get('seed') || 7) || 7;
+const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+const pick = (a) => a[Math.floor(rnd() * a.length)];
+
+const now = Date.now() / 1000;
+const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
+const sinceMidnight = now - midnight / 1000;
+const at = (daysAgo, hour) => sinceMidnight + daysAgo * 86400 - hour * 3600;
+
+const events = []; let n = 0;
+const add = (label, camera, ago, dur, score, zones = [], sub = null) => events.push({
+  id: `${(now - ago).toFixed(3)}-${(n++).toString(36)}`,
+  label, camera, zones, sub_label: sub, start_time: now - ago, end_time: now - ago + dur,
+  has_clip: true, has_snapshot: ago < 14 * 86400, false_positive: false, data: { top_score: score },
+});
+
+for (let d = 0; d < 30; d++) {
+  for (let i = 0; i < 6 + rnd() * 22; i++)
+    add('bird', pick(['Backyard', 'Front', 'Garage_porch', 'Side_porch']), at(d, 7 + rnd() * 10), 8 + rnd() * 30, 0.72 + rnd() * 0.25, [], rnd() > 0.6 ? 'dark_eyed_junco' : null);
+  for (let i = 0; i < rnd() * 5; i++)
+    add('rabbit', pick(['Driveway', 'Front', 'Backyard']), at(d, rnd() > 0.5 ? 6 + rnd() * 2 : 18 + rnd() * 3), 20 + rnd() * 200, 0.75 + rnd() * 0.2, ['driveway_margins']);
+  if (rnd() > 0.55) add('raccoon', pick(['Driveway', 'Garage_gate', 'Side_yard']), at(d, 1 + rnd() * 4), 30, 0.7 + rnd() * 0.25);
+  if (rnd() > 0.4) add('squirrel', 'Backyard', at(d, 9 + rnd() * 7), 20, 0.73 + rnd() * 0.2);
+  // A rodent spate over the last few days, so the trend headline has something to say.
+  for (let i = 0; i < (d < 4 ? 2 + Math.floor(rnd() * 4) : (rnd() > 0.8 ? 1 : 0)); i++)
+    add('rodent', pick(['Bedroom_windows', 'Garage_back', 'Side_yard', 'Bedroom_windows']), at(d, (22 + rnd() * 7) % 24), 10 + rnd() * 20, 0.62 + rnd() * 0.33, ['inside_fence']);
+  for (let i = 0; i < (d < 5 ? 1 + Math.floor(rnd() * 3) : (rnd() > 0.7 ? 1 : 0)); i++)
+    add('cat', pick(['Side_porch', 'Front_door', 'Bedroom_windows']), at(d, (20 + rnd() * 9) % 24), 25, 0.7 + rnd() * 0.28);
+  if (d % 9 === 3) add('fox', 'Back_door', at(d, 4), 15, 0.78);
+}
+if (!q.get('quiet')) {                       // two dogs at 2am, no person: a likely pack
+  add('dog', 'Driveway', at(1, 2.2), 40, 0.88);
+  add('dog', 'Driveway', at(1, 2.2) - 6, 35, 0.81);
+}
+add('dog', 'Front', at(6, 3.5), 20, 0.79);   // single dog at night: a likely coyote
+add('dog', 'Driveway', at(3, 23.6), 30, 0.9); // dog with a person: not a coyote
+add('person', 'Driveway', at(3, 23.6) + 10, 60, 0.95);
+events.sort((a, b) => b.start_time - a.start_time);
+
+/* ---- placeholder stills (no real footage in this repo) ------------------- */
+const SHAPE = {
+  rodent: '<ellipse cx="92" cy="62" rx="15" ry="8"/><circle cx="105" cy="57" r="6"/><path d="M78 62q-14 2-18 10" stroke="currentColor" stroke-width="3" fill="none"/>',
+  rabbit: '<ellipse cx="88" cy="60" rx="17" ry="11"/><circle cx="104" cy="50" r="7"/><path d="M101 44q-2-14 3-16M107 44q2-14 7-14" stroke="currentColor" stroke-width="4" fill="none" stroke-linecap="round"/>',
+  bird: '<ellipse cx="88" cy="60" rx="13" ry="9"/><circle cx="99" cy="53" r="5"/><path d="M104 52l7-2-6 4" /><path d="M78 58q-10 4-14 10" stroke="currentColor" stroke-width="3" fill="none"/>',
+  cat: '<ellipse cx="86" cy="60" rx="20" ry="10"/><circle cx="106" cy="52" r="7"/><path d="M101 46l-2-7 7 4M111 46l2-7-7 4"/><path d="M66 58q-10-6-8-18" stroke="currentColor" stroke-width="4" fill="none" stroke-linecap="round"/>',
+  raccoon: '<ellipse cx="86" cy="61" rx="19" ry="11"/><circle cx="105" cy="55" r="7"/><path d="M67 60q-12 0-16 8" stroke="currentColor" stroke-width="6" fill="none" stroke-dasharray="5 4"/>',
+  squirrel: '<ellipse cx="90" cy="62" rx="14" ry="9"/><circle cx="102" cy="54" r="6"/><path d="M76 60q-14-2-12-18 1-8 9-8" stroke="currentColor" stroke-width="6" fill="none" stroke-linecap="round"/>',
+  dog: '<ellipse cx="84" cy="52" rx="22" ry="11"/><circle cx="108" cy="44" r="8"/><path d="M103 37l-3-8 8 4"/><path d="M70 62v10M82 62v10M94 62v10M62 48q-10-4-12-14" stroke="currentColor" stroke-width="4" fill="none" stroke-linecap="round"/>',
+  fox: '<ellipse cx="86" cy="54" rx="20" ry="10"/><circle cx="106" cy="46" r="7"/><path d="M101 40l-2-8 7 4M111 40l3-8 -8 4"/><path d="M66 54q-14-2-16-14" stroke="currentColor" stroke-width="7" fill="none" stroke-linecap="round"/>',
+};
+const NIGHT = new Set(['rodent', 'raccoon', 'dog', 'fox']);
+const still = (e) => {
+  const night = NIGHT.has(e.label) || /(2[0-3]|0[0-5]):/.test(new Date(e.start_time * 1000).toTimeString());
+  const g = night ? ['#2b2f33', '#14171a'] : ['#7d9b63', '#4e6b44'];
+  const ink = night ? '#0b0d0f' : '#2b3326';
+  return 'data:image/svg+xml,' + encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 90" preserveAspectRatio="xMidYMid slice">
+       <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+         <stop offset="0" stop-color="${g[0]}"/><stop offset="1" stop-color="${g[1]}"/></linearGradient></defs>
+       <rect width="160" height="90" fill="url(#g)"/>
+       <path d="M0 70h160" stroke="${night ? '#3a4046' : '#6d8a57'}" stroke-width="10" opacity=".5"/>
+       <g fill="${ink}" color="${ink}" opacity=".88">${SHAPE[e.label] || SHAPE.rodent}</g>
+     </svg>`);
+};
+
+/* ---- fake hass ----------------------------------------------------------- */
+let calls = 0;
+const hass = {
+  config: { time_zone: 'America/Los_Angeles' },
+  locale: { language: 'en' },
+  hassUrl: (p) => p,
+  async callWS(msg) {
+    if (msg.type !== 'frigate/events/get') throw new Error(`unexpected ws call: ${msg.type}`);
+    calls++;
+    return JSON.stringify(events.filter((e) =>
+      msg.labels.includes(e.label)
+      && (!msg.cameras || msg.cameras.includes(e.camera))
+      && e.start_time >= (msg.after || 0)
+      && e.start_time <= (msg.before || 1e12)).slice(0, msg.limit || 100));
+  },
+};
+
+await import('../dist/wildlife-card.js');
+const Card = customElements.get('wildlife-card');
+// Placeholders stand in for the integration's media proxy.
+Card.prototype._media = function (id, file) {
+  const e = events.find((x) => x.id === id);
+  return file === 'clip.mp4' ? 'about:blank' : still(e || { label: 'rodent', start_time: now });
+};
+const el = document.createElement('wildlife-card');
+el.setConfig(JSON.parse(q.get('config') || '{}'));
+el.hass = hass;
+document.getElementById('host').appendChild(el);
+window.card = el;
+window.wsCalls = () => calls;
+window.ready = true;
+</script>
+</body>
+</html>
