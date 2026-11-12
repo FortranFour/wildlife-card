@@ -124,6 +124,34 @@ const shot = async (page, name) => {
   await page.close();
 }
 
+/* 4c — day/night shading: present, lighter by day, and dated per column */
+{
+  const page = await open("", 820);
+  await page.click$('[data-act="days"][data-v="30"]');
+  await page.click$('[data-act="view"][data-v="hour"]');
+  check(!!(await page.$("wildlife-card .grid.sky")), "the time rows carry day/night shading");
+  const lum = (rgb) => rgb.split(",").reduce((a, b) => a + +b, 0) / 3;
+  const rowSky = (i) => page.$eval(`wildlife-card .rows .row:nth-child(${i + 1})`,
+    (r) => r.style.getPropertyValue("--sky"));
+  const [midnight, midday] = [await rowSky(0), await rowSky(6)];
+  check(lum(midday) > lum(midnight), `midday is lighter than midnight (${midday} vs ${midnight})`);
+  // 4pm-6pm in Seattle crosses sunset somewhere inside a 30-day window.
+  const drift = await page.$$eval("wildlife-card .rows .row:nth-child(9) .c",
+    (cs) => [cs[0].style.getPropertyValue("--sky"), cs[cs.length - 1].style.getPropertyValue("--sky")]);
+  check(drift[0] !== drift[1], `each column uses its own date (${drift[0]} → ${drift[1]})`);
+  check(/^\d+a? ?.{0,3} ?\d/.test((await page.text$(".rows .lab")).trim()), "time labels keep their from-to shape");
+  await page.close();
+}
+
+/* 4d — without a latitude there is nothing to compute, and it simply goes away */
+{
+  const page = await open("&nosun=1");
+  await page.click$('[data-act="view"][data-v="hour"]');
+  check(!(await page.$("wildlife-card .grid.sky")), "shading is skipped when the location is unknown");
+  check((await page.$$c(".row")).length === 12, "the time rows still render without it");
+  await page.close();
+}
+
 /* 5 — the dog-at-night inference, dark theme, and the location view */
 {
   const page = await open("&dark=1");

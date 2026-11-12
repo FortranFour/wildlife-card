@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.0 — 2026-11-12
+
+- **Day/night shading on the time-of-day rows.** A faint strip beside the time labels and a wash behind the cells show at a glance whether a sighting was in daylight, darkness, dawn or dusk. Every column uses its own date, so across a 30-day range you can watch the nights draw in.
+- The shading comes from the sun's altitude at your latitude, computed in the card, so there is nothing to configure beyond having a location set in Home Assistant — and no dependency on the sun entity, which only knows about today. Each two-hour cell is sampled every half hour and the colours blended, so a cell straddling sunrise comes out part night, part dawn. Dawn and dusk are identical as far as the sun is concerned, so they are told apart by whether it is on its way up.
+- Light and dark themes get their own palettes: a warm daylight tint turns olive over a dark surface, so the dark theme uses a paler, cooler day.
+- Turn it off with `sun_shading: false`. It also skips itself when no latitude is set.
+- The time labels now line up on the dash, so `10a – 12p` and `2a – 4a` share a vertical edge instead of stepping in and out.
+
 ## 1.0.3 — 2026-11-11
 
 - **Clips play through hls.js**, loaded only the first time a clip is opened. Apple's native player rejected recordings outright — asking for the same 11 MB segment nine times in eight seconds and discarding each complete copy — while Home Assistant's own media browser played the same event, from the same server, over the same connection. The difference was the player, so the card now uses the same library the media browser does.

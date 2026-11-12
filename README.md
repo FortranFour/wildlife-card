@@ -8,7 +8,7 @@ A Home Assistant dashboard card for the animals your [Frigate](https://frigate.v
 
 - **A headline that reads the trend, not the last event.** Which animals are running above or below their own usual rate over the last three days, the numbers behind it, where and when rodents concentrate, and whether cat activity tracks rodent activity day to day.
 - **One tile per species**, each showing the best-scoring recent picture, a count for the period and how long ago the last sighting was. Tap one and the sightings browser shows that species alone — and so does the grid, once you switch it to Time or Location.
-- **An activity grid** of days across by species, two-hour block, or camera — so a spate, a nightly pattern or one bad corner of the property stands out. Tap any cell to see just those sightings.
+- **An activity grid** of days across by species, two-hour block, or camera — so a spate, a nightly pattern or one bad corner of the property stands out. Tap any cell to see just those sightings. The time-of-day view is shaded for daylight, darkness, dawn and dusk, each column by its own date.
 - **A sightings browser**: a filmstrip newest-first, a full snapshot with previous/next, and the clip for any sighting that has one.
 - **A confidence filter**, tucked behind the tune icon, to screen out the misclassifications every model produces.
 - **Coyotes without a coyote label.** Frigate+ does not detect coyotes yet, so the card can infer them: a dog on chosen cameras late at night with no person nearby, and two overlapping tracks flagged as a pack.
@@ -40,6 +40,7 @@ type: custom:wildlife-card
 title: Wildlife
 icon: mdi:binoculars
 instance_id: frigate
+sun_shading: true
 days: 14
 min_score: 70
 refresh: 300
@@ -68,6 +69,7 @@ Quote `start` and `end`. Unquoted, YAML reads `23:00` as a number and the night 
 | `days` | `14` | Range the card opens on: `7`, `14` or `30`. |
 | `min_score` | `70` | Confidence filter the card opens on, in percent (50–99). |
 | `refresh` | `300` | Seconds between background refreshes. Minimum 60. |
+| `sun_shading` | `true` | Day/night shading behind the time-of-day rows. Needs a latitude and longitude set in Home Assistant; skipped if there is none. |
 | `indoor_cameras` | `[Attic, Crawlspace]` | Cameras where a rodent is an alert rather than a sighting. |
 | `coyote.enabled` | `true` | Infer coyotes from night-time dogs. See below. |
 | `coyote.cameras` | `[Driveway, Front]` | Cameras the inference looks at. |

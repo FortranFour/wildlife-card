@@ -9,6 +9,7 @@
 
   Query string: ?w=430 card width · ?dark=1 dark theme · ?seed=7 data seed
                 ?quiet=1 no coyote pack in the data · ?hls=1 claim native HLS
+                ?nosun=1 no latitude, so no day/night shading
 -->
 <html lang="en">
 <head>
@@ -117,7 +118,10 @@ const still = (e) => {
 let calls = 0;
 const hass = {
   // Match the browser, so generated times land where the card reads them.
-  config: { time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone },
+  config: {
+    time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    ...(q.get('nosun') ? {} : { latitude: 47.6062, longitude: -122.3321 }),  // Seattle, for the shading
+  },
   locale: { language: 'en' },
   hassUrl: (p) => p,
   async callWS(msg) {

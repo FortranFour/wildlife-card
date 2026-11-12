@@ -16,6 +16,7 @@
  *   instance_id: frigate          # Frigate mqtt client_id
  *   days: 14                      # initial range: 7, 14 or 30
  *   min_score: 70                 # initial confidence filter, percent
+ *   sun_shading: true             # day/night shading behind the time-of-day rows
  *   refresh: 300                  # seconds between background refreshes
  *   indoor_cameras: [Attic, Crawlspace]
  *   coyote:
@@ -54,6 +55,29 @@
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const pretty = (s) => String(s || '').replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
   const hhmm = (s, d) => { const m = /^(\d{1,2}):?(\d{2})?/.exec(String(s ?? '')); return m ? +m[1] + (+(m[2] || 0)) / 60 : d; };
+
+  /* Low-precision solar position (USNO): the sun's altitude in degrees, for a
+     UTC instant at a given latitude and longitude. Good to a couple of minutes
+     either side of sunrise, which is far finer than a two-hour row needs. */
+  const RAD = Math.PI / 180;
+  const altitude = (ms, lat, lon) => {
+    const d = ms / 86400000 - 10957.5;
+    const g = (357.529 + 0.98560028 * d) * RAD;
+    const q = 280.459 + 0.98564736 * d;
+    const L = (q + 1.915 * Math.sin(g) + 0.020 * Math.sin(2 * g)) * RAD;
+    const e = (23.439 - 0.00000036 * d) * RAD;
+    const ra = Math.atan2(Math.cos(e) * Math.sin(L), Math.cos(L)) / RAD;
+    const dec = Math.asin(Math.sin(e) * Math.sin(L));
+    const ha = (((18.697374558 + 24.06570982441908 * d) % 24) * 15 + lon - ra) * RAD;
+    return Math.asin(Math.sin(lat * RAD) * Math.sin(dec) + Math.cos(lat * RAD) * Math.cos(dec) * Math.cos(ha)) / RAD;
+  };
+
+  /* Two palettes: over a dark surface a warm daylight tint turns olive, so the
+     dark theme gets a paler, less saturated day and a cooler dusk. */
+  const SKY = {
+    light: { night: [38, 62, 130], dawn: [226, 132, 170], day: [250, 206, 112], dusk: [242, 146, 62] },
+    dark: { night: [60, 96, 190], dawn: [236, 150, 190], day: [214, 226, 255], dusk: [250, 178, 120] },
+  };
 
   const CSS = `
     :host { display:block; --wl-rgb: var(--rgb-primary-color, 3,169,244); --wl-ink: var(--rgb-primary-text-color, 33,33,33); }
@@ -103,6 +127,13 @@
     .c.sel { outline:2px solid var(--primary-text-color); outline-offset:1px; }
     .c:hover { outline:2px solid rgba(var(--wl-ink),.55); outline-offset:1px; }
     .rows { display:grid; gap:2px; }
+    .grid.hours .lab { display:grid; grid-template-columns:1fr auto 1fr; align-items:center; gap:3px; }
+    .grid.hours .lab em { font-style:normal; opacity:.5; }
+    .grid.hours .lab span:first-child { text-align:right; }
+    .grid.hours .lab span:last-child { text-align:left; }
+    .grid.sky .row .lab { background:rgba(var(--sky),.22); margin:-1px 0; padding:1px 4px 1px 6px; border-radius:3px; }
+    .grid.sky .c { background:rgba(var(--sky),.16); }
+    .grid.sky .c[data-v] { background:linear-gradient(rgba(var(--wl-rgb),var(--a)),rgba(var(--wl-rgb),var(--a))),rgba(var(--sky),.16); }
     .axis { display:grid; grid-template-columns:var(--lab) minmax(0,1fr) 30px; gap:6px; margin-top:4px; }
     .axis div { position:relative; height:14px; font-size:10px; color:var(--secondary-text-color); }
     .axis span { position:absolute; top:0; transform:translateX(-50%); white-space:nowrap; }
@@ -156,6 +187,7 @@
         icon: c.icon || 'mdi:binoculars',
         instance: c.instance_id || 'frigate',
         refresh: Math.max(60, +c.refresh || 300),
+        sun: c.sun_shading !== false,
         indoor: (c.indoor_cameras || ['Attic', 'Crawlspace']).map((s) => s.toLowerCase()),
         species: (Array.isArray(c.species) && c.species.length ? c.species : DEFAULT_SPECIES).map((s) => ({
           id: s.id, name: s.name || pretty(s.id), one: s.one || (s.name || pretty(s.id)).replace(/e?s$/, ''),
@@ -209,7 +241,7 @@
         const loc = this._hass?.locale?.language || undefined;
         this._f = {
           tz,
-          parts: new Intl.DateTimeFormat('en-CA', { ...o, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23' }),
+          parts: new Intl.DateTimeFormat('en-CA', { ...o, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }),
           time: new Intl.DateTimeFormat(loc, { ...o, hour: 'numeric', minute: '2-digit' }),
           day: new Intl.DateTimeFormat(loc, { ...o, weekday: 'short', month: 'short', day: 'numeric' }),
           md: new Intl.DateTimeFormat(loc, { ...o, month: 'short', day: 'numeric' }),
@@ -349,6 +381,57 @@
       for (const e of this._events.values()) if (e.day >= first && e.score < min) n++;
       return n;
     }
+    /* Faint day/night shading behind the time rows, worked out from the sun's
+       altitude at this house's latitude, so every column uses its own date and
+       the nights visibly draw in across a 30-day view. Each two-hour cell is
+       sampled every half hour and the colours blended, so a cell straddling
+       sunrise comes out part night, part dawn. Dawn and dusk are identical as
+       far as the sun is concerned, so they are told apart by whether it is on
+       its way up. */
+    _skyFor(day) {
+      const { latitude: lat, longitude: lon } = this._hass?.config || {};
+      if (!this._cfg.sun || typeof lat !== 'number' || typeof lon !== 'number') return null;
+      const sky = SKY[this._darkTheme() ? 'dark' : 'light'];
+      const key = `${lat},${lon},${this._darkTheme()}`;
+      if (this._skyKey !== key) { this._skyKey = key; this._skyMemo = new Map(); }
+      const seen = this._skyMemo.get(day.key);
+      if (seen) return seen;
+
+      const [Y, M, D] = day.key.split('-').map(Number);
+      const offset = this._offsetMs(day.ts);
+      const utcAt = (h) => Date.UTC(Y, M - 1, D) + h * 3600000 - offset;
+      const mix = (a, b, t) => a.map((v, i) => v + (b[i] - v) * Math.max(0, Math.min(1, t)));
+      const colour = (h) => {
+        const alt = altitude(utcAt(h), lat, lon);
+        const twilight = altitude(utcAt(h + 0.25), lat, lon) > alt ? sky.dawn : sky.dusk;
+        if (alt >= 6) return sky.day;
+        if (alt >= -3) return mix(twilight, sky.day, (alt + 3) / 9);
+        if (alt >= -12) return mix(sky.night, twilight, (alt + 12) / 9);
+        return sky.night;
+      };
+      const rows = Array.from({ length: 12 }, (_, i) => {
+        const blend = [0.25, 0.75, 1.25, 1.75].map((o) => colour(i * 2 + o))
+          .reduce((acc, c) => acc.map((v, k) => v + c[k] / 4), [0, 0, 0]);
+        return blend.map(Math.round).join(',');
+      });
+      this._skyMemo.set(day.key, rows);
+      return rows;
+    }
+
+    /* Light text means a dark theme, whatever the operating system is set to. */
+    _darkTheme() {
+      const ink = getComputedStyle(this).getPropertyValue('--rgb-primary-text-color').trim() || '33,33,33';
+      const parts = ink.split(',').map(Number);
+      return parts.length === 3 && (parts[0] + parts[1] + parts[2]) / 3 > 128;
+    }
+
+    /* How far this time zone was from UTC on the day containing ts. */
+    _offsetMs(ts) {
+      const p = {};
+      for (const x of this._fmt().parts.formatToParts(new Date(ts * 1000))) p[x.type] = x.value;
+      return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute) - ts * 1000;
+    }
+
     _rowKey(e) { return this._ui.view === 'species' ? e.sp : this._ui.view === 'camera' ? e.cam : String(Math.floor(e.hour / 2)); }
     _filtered(all) {
       const { sp, cell } = this._ui;
@@ -479,11 +562,20 @@
       const src = u.view === 'species' ? all : all.filter((e) => !u.sp || e.sp === u.sp);
       let rows;
       if (u.view === 'species') rows = this._cfg.species.map((s) => ({ key: s.id, label: `${s.glyph} ${s.name}`, on: u.sp === s.id }));
-      else if (u.view === 'hour') rows = Array.from({ length: 12 }, (_, i) => ({ key: String(i), label: `${(i * 2) % 12 || 12}${i < 6 ? 'a' : 'p'}–${((i + 1) * 2) % 12 || 12}${i + 1 < 6 || i === 11 ? 'a' : 'p'}` }));
+      else if (u.view === 'hour') {
+        rows = Array.from({ length: 12 }, (_, i) => {
+          const from = `${(i * 2) % 12 || 12}${i < 6 ? 'a' : 'p'}`;
+          const to = `${((i + 1) * 2) % 12 || 12}${i + 1 < 6 || i === 11 ? 'a' : 'p'}`;
+          return { key: String(i), label: `${from}–${to}`, html: `<span>${from}</span><em>–</em><span>${to}</span>` };
+        });
+      }
       else {
         const m = {}; for (const e of src) m[e.cam] = (m[e.cam] || 0) + 1;
         rows = Object.keys(m).sort((a, b) => m[b] - m[a]).map((k) => ({ key: k, label: pretty(k) }));
       }
+      // One palette per day; the strip beside the labels follows the latest.
+      const sky = u.view === 'hour' ? days.map((d) => this._skyFor(d)) : [];
+      const today = sky.length ? sky[sky.length - 1] : null;
       const count = {};
       for (const e of src) { const k = `${this._rowKey(e)}|${e.day}`; count[k] = (count[k] || 0) + 1; }
       const shared = u.view === 'species' ? null : Math.max(3, ...Object.values(count));
@@ -491,14 +583,15 @@
         let tot = 0; let max = 3;
         for (const d of days) { const v = count[`${r.key}|${d.key}`] || 0; tot += v; if (v > max) max = v; }
         const scale = shared || max;
-        const cells = days.map((d) => {
+        const cells = days.map((d, di) => {
           const v = count[`${r.key}|${d.key}`] || 0;
           const wk = f.wd.format(new Date(d.ts * 1000)) === 'Mon' ? ' wk' : '';
           const sel = u.cell && u.cell.row === r.key && u.cell.day === d.key ? ' sel' : '';
           const a = v ? (0.3 + 0.7 * Math.sqrt(Math.min(1, v / scale))).toFixed(2) : 0;
-          return `<button class="c${wk}${sel}" data-act="cell" data-row="${esc(r.key)}" data-day="${d.key}" data-n="${v}" data-lab="${esc(r.label)}"${v ? ` data-v style="--a:${a}"` : ''} aria-label="${esc(r.label)}, ${esc(f.day.format(new Date(d.ts * 1000)))}: ${v}"></button>`;
+          const style = [v ? `--a:${a}` : '', sky[di] ? `--sky:${sky[di][+r.key]}` : ''].filter(Boolean).join(';');
+          return `<button class="c${wk}${sel}" data-act="cell" data-row="${esc(r.key)}" data-day="${d.key}" data-n="${v}" data-lab="${esc(r.label)}"${v ? ' data-v' : ''}${style ? ` style="${style}"` : ''} aria-label="${esc(r.label)}, ${esc(f.day.format(new Date(d.ts * 1000)))}: ${v}"></button>`;
         }).join('');
-        return `<div class="row"><button class="lab${r.on ? ' on' : ''}" data-act="row" data-row="${esc(r.key)}">${esc(r.label)}</button><div class="cells">${cells}</div><div class="tot">${tot || ''}</div></div>`;
+        return `<div class="row"${today ? ` style="--sky:${today[+r.key]}"` : ''}><button class="lab${r.on ? ' on' : ''}" data-act="row" data-row="${esc(r.key)}">${r.html || esc(r.label)}</button><div class="cells">${cells}</div><div class="tot">${tot || ''}</div></div>`;
       }).join('');
       const n = days.length; const step = n <= 7 ? 1 : n <= 14 ? 3 : 7; let ticks = '';
       for (let i = n - 1 - step; i >= 0; i -= step) ticks += `<span style="left:${((i + 0.5) / n) * 100}%">${esc(f.md.format(new Date(days[i].ts * 1000)))}</span>`;
@@ -507,7 +600,7 @@
       const title = u.view === 'species' ? 'Sightings per day' : u.view === 'hour' ? `${sp} · time of day` : `${sp} · by camera`;
       const seg = [['species', 'Species'], ['hour', 'Time'], ['camera', 'Location']].map(([v, l]) => `<button data-act="view" data-v="${v}" aria-pressed="${u.view === v}">${l}</button>`).join('');
       this._$('.chart').innerHTML = `<div class="sub"><h3>${esc(title)}</h3><span class="seg" role="group">${seg}</span></div>
-        <div class="grid" style="--lab:${u.view === 'camera' ? '104px' : u.view === 'hour' ? '54px' : '92px'};--ch:${u.view === 'hour' ? '13px' : '18px'}">
+        <div class="grid${today ? ' sky' : ''}${u.view === 'hour' ? ' hours' : ''}" style="--lab:${u.view === 'camera' ? '104px' : u.view === 'hour' ? '66px' : '92px'};--ch:${u.view === 'hour' ? '13px' : '18px'}">
           ${rows.length ? `<div class="rows">${body}</div><div class="axis"><i></i><div>${ticks}</div><i></i></div>` : '<div class="empty" style="padding-left:0">Nothing to chart for this selection.</div>'}
           <div class="tip" hidden></div></div>
         <div class="key"><span>fewer</span><u style="--a:.3"></u><u style="--a:.55"></u><u style="--a:.75"></u><u style="--a:1"></u><span>more${u.view === 'species' ? ' · each row on its own scale' : ''}</span></div>`;
