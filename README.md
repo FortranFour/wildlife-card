@@ -131,6 +131,20 @@ Two or more such tracks overlapping in time are flagged as a **pack**, which is 
 
 If the person lookup fails, the card infers nothing rather than guessing. Set `coyote.enabled: false` to switch the whole thing off, and if a model ever does detect `coyote`, those detections are picked up with no change needed.
 
+## Day, night, dawn and dusk
+
+The time-of-day view is shaded for the light the camera was working in. It comes from the sun's altitude at your latitude, computed in the card rather than read from the `sun.sun` entity, which only knows about today — so **every column is tinted for its own date**, and over thirty days you can watch the nights draw in. Each two-hour cell is sampled every half hour and the colours blended, so a cell straddling sunrise comes out part night, part dawn. Dawn and dusk are identical as far as the sun is concerned, so they are told apart by whether the sun is on its way up.
+
+It also makes the animals sort themselves. Over the same thirty days, 28 of 29 rodent sightings fall between 8pm and 6am, and exactly one of 448 bird sightings does:
+
+| Rodents — nocturnal | Birds — the inverse |
+|---|---|
+| ![Rodents by time of day](docs/time-rodents.png) | ![Birds by time of day](docs/time-birds.png) |
+
+Everything together is busiest in the blocks straddling sunrise and sunset, with a mid-afternoon peak between them:
+
+![All wildlife by time of day](docs/time-all.png)
+
 ## What the headline says
 
 In order of precedence:
