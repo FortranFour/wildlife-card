@@ -4,6 +4,9 @@
   no Home Assistant and no real footage. Run `node dev/test.mjs`, or serve the
   repo root and open /dev/harness.html.
 
+  Times are generated in the browser's own time zone, which the fake hass
+  reports as Home Assistant's, so the data means the same thing anywhere.
+
   Query string: ?w=430 card width · ?dark=1 dark theme · ?seed=7 data seed
                 ?quiet=1 no coyote pack in the data
 -->
@@ -111,7 +114,8 @@ const still = (e) => {
 /* ---- fake hass ----------------------------------------------------------- */
 let calls = 0;
 const hass = {
-  config: { time_zone: 'America/Los_Angeles' },
+  // Match the browser, so generated times land where the card reads them.
+  config: { time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone },
   locale: { language: 'en' },
   hassUrl: (p) => p,
   async callWS(msg) {

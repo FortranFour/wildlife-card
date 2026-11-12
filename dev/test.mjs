@@ -34,7 +34,12 @@ const failures = [];
 const check = (ok, what) => { console.log(`${ok ? "  ok  " : "FAIL  "}${what}`); if (!ok) failures.push(what); };
 
 async function open(query = "", width = 430) {
-  const page = await browser.newPage({ viewport: { width: width + 32, height: 1000 }, deviceScaleFactor: 2 });
+  const page = await browser.newPage({
+    viewport: { width: width + 32, height: 1000 }, deviceScaleFactor: 2,
+    // Pinned so the generated night-time events and the screenshots are the
+    // same on any machine, whatever the runner's time zone.
+    timezoneId: "America/Los_Angeles", locale: "en-US",
+  });
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
   page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
@@ -93,8 +98,8 @@ const shot = async (page, name) => {
 /* 5 — the dog-at-night inference, dark theme, and the location view */
 {
   const page = await open("&dark=1");
-  const coyote = await page.text$('.tile[data-v="coyote"]');
-  check(/\d/.test(coyote), "coyotes inferred from night-time dogs");
+  const coyote = await page.$('wildlife-card .tile[data-v="coyote"] .n');
+  check(coyote !== null && +(await coyote.textContent()) >= 2, "coyotes inferred from night-time dogs");
   check(!!(await page.$("wildlife-card .tile .flag")), "a pack of two is flagged");
   await page.click$('.tile[data-v="coyote"]');
   await page.click$('[data-act="view"][data-v="camera"]');
