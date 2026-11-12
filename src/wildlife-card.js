@@ -427,7 +427,7 @@
       });
       this._root.addEventListener('error', (ev) => {
         if (ev.target.tagName === 'IMG' && ev.target.dataset.id) this._imgFallback(ev.target);
-        if (ev.target.tagName === 'VIDEO') this._clipFailed(ev.target);
+        if (ev.target.tagName === 'VIDEO' && !ev.target._hls) this._attachMedia(ev.target);
       }, true);
       this._root.addEventListener('pointermove', (ev) => this._tip(ev));
       this._root.addEventListener('pointerleave', () => this._tip(null));
@@ -538,17 +538,13 @@
 
     _stage() {
       const wrap = this._$('.stagewrap'); if (!wrap) return;
+      wrap.querySelector('video')?._hls?.destroy();
       const list = this._list || []; const i = list.findIndex((e) => e.id === this._ui.cur);
       if (i < 0) { wrap.innerHTML = ''; return; }
       const e = list[i];
       const still = e.snap ? this._media(e.id, 'snapshot.jpg') : this._thumb(e);
-      // Safari and the iOS app reject MP4s that other browsers play. They handle
-      // HLS natively, and the integration serves an event's HLS from the same
-      // proxy, so prefer it where it is native and keep the file as a fallback.
-      const mp4 = this._media(e.id, 'clip.mp4');
-      if (this._nativeHls === undefined) this._nativeHls = !!document.createElement('video').canPlayType('application/vnd.apple.mpegurl');
       const media = this._ui.clip && e.clip
-        ? `<video class="media" controls autoplay playsinline muted preload="metadata" poster="${esc(still)}" src="${esc(this._nativeHls ? this._media(e.id, 'index.m3u8') : mp4)}"${this._nativeHls ? ` data-mp4="${esc(mp4)}"` : ''}></video>`
+        ? `<video class="media" controls playsinline muted preload="metadata" poster="${esc(still)}" data-hls="${esc(this._media(e.id, 'index.m3u8'))}" data-mp4="${esc(this._media(e.id, 'clip.mp4'))}"></video>`
         : `<img class="media" alt="${esc(this._name(e))}" data-id="${esc(e.id)}" data-kind="${e.snap ? 'snapshot' : 'thumbnail'}" src="${esc(still)}">`;
       const dur = e.end ? Math.max(1, Math.round(e.end - e.start)) : null;
       const meta = [pretty(e.cam), `${Math.round(e.score * 100)}%${e.inferred ? ' as dog' : ''}`, dur ? (dur >= 90 ? `${Math.round(dur / 60)} min` : `${dur}s`) : 'in progress', ...e.zones.slice(0, 2).map(pretty)];
@@ -561,19 +557,55 @@
           ${e.clip ? (this._ui.clip ? `<button class="pill" data-act="still">${svg('image')}Photo</button>` : `<button class="pill" data-act="clip">${svg('play')}Video</button>`) : ''}
           <a class="pill ghost" target="_blank" rel="noopener" href="${esc(e.clip ? this._media(e.id, 'clip.mp4') : still)}" title="Open in a new tab" aria-label="Open in a new tab">${svg('open')}</a>
         </div></div>`;
+      const video = wrap.querySelector('video');
+      if (video) this._attachMedia(video);
       this._root.querySelectorAll('.shot').forEach((b) => b.setAttribute('aria-current', String(+b.dataset.i === i)));
       this._root.querySelector('.shot[aria-current="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
     }
 
-    /* Safari and the iOS app refuse a file outright where other browsers play
-       what they can of it, so say which way it failed and offer the direct link. */
-    _clipFailed(v) {
-      if (v.dataset.mp4) {        // HLS did not work here: try the plain file once
-        const url = v.dataset.mp4;
-        delete v.dataset.mp4;
-        v.src = url; v.load(); v.play().catch(() => {});
+    /* Play order: hls.js, then the browser's own HLS, then the file. Home
+       Assistant's media browser uses hls.js and plays recordings that Apple's
+       native player rejects outright — same file, same connection — so the
+       library goes first wherever it works, and each step falls to the next. */
+    async _attachMedia(v) {
+      const play = () => v.play().catch(() => {});
+      if (v.dataset.hls && !v.dataset.noLib) {
+        const Hls = await this._hlsLib();
+        if (Hls && Hls.isSupported() && v.isConnected) {
+          const hls = new Hls({ enableWorker: false });
+          v._hls = hls;
+          hls.on(Hls.Events.ERROR, (_event, data) => {
+            if (!data.fatal) return;
+            hls.destroy(); v._hls = null; v.dataset.noLib = '1'; this._attachMedia(v);
+          });
+          hls.on(Hls.Events.MANIFEST_PARSED, play);
+          hls.loadSource(v.dataset.hls);
+          hls.attachMedia(v);
+          return;
+        }
+      }
+      if (v.dataset.hls && !v.dataset.noNative && v.canPlayType('application/vnd.apple.mpegurl')) {
+        v.dataset.noNative = '1';
+        v.src = v.dataset.hls; v.load(); play();
         return;
       }
+      if (v.dataset.mp4) {
+        const url = v.dataset.mp4; delete v.dataset.mp4;
+        v.src = url; v.load(); play();
+        return;
+      }
+      this._clipNotice(v);
+    }
+
+    /* Bundled, but only fetched the first time a clip is opened. */
+    async _hlsLib() {
+      if (this._hlsMod === undefined) {
+        try { this._hlsMod = (await import('hls.js/dist/hls.light.mjs')).default; } catch (err) { this._hlsMod = null; }
+      }
+      return this._hlsMod;
+    }
+
+    _clipNotice(v) {
       const why = {
         1: ['Loading the clip was interrupted.', 'It may just need another try.'],
         2: ['The clip could not be fetched.', 'A network or proxy problem rather than the recording itself.'],

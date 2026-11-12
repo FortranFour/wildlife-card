@@ -23,7 +23,7 @@ A Home Assistant dashboard card for the animals your [Frigate](https://frigate.v
 
 **HACS:** HACS → ⋮ → *Custom repositories* → add `https://github.com/FortranFour/wildlife-card` as type **Dashboard**, then install *Wildlife Card*. HACS adds the resource `/hacsfiles/wildlife-card/wildlife-card.js`.
 
-**Manual:** download `wildlife-card.js` from the [latest release](https://github.com/FortranFour/wildlife-card/releases) into `/config/www/`, then add `/local/wildlife-card.js` as a JavaScript module resource.
+**Manual:** download every file attached to the [latest release](https://github.com/FortranFour/wildlife-card/releases) into `/config/www/wildlife-card/`, then add `/local/wildlife-card/wildlife-card.js` as a JavaScript module resource. Keep the other file beside it — the card loads it the first time you play a clip.
 
 ## Add the card
 
@@ -143,7 +143,7 @@ On a 7-day range the baseline is only 4 days, so the flags are jumpier there tha
 ## Notes and limits
 
 - **History is bounded by Frigate's retention.** The card can only show what Frigate still holds, so the 30-day range is empty beyond your `record` and `snapshots` retention. Sightings older than your snapshot retention fall back to the thumbnail.
-- **Clips play over HLS on Apple devices.** Safari and the iOS Companion app refuse MP4s that other browsers play. Where HLS is native the card uses the event's HLS stream, served by the same proxy, and falls back to the file if that fails. A clip that still will not play says which way it failed and offers the file.
+- **Clips play over HLS**, through [hls.js](https://github.com/video-dev/hls.js), using the event stream the Frigate integration serves from the same proxy. Apple's native player rejects recordings that hls.js plays without complaint, which is why Home Assistant's own media browser succeeds where a plain video element fails. The card tries hls.js, then the browser's own HLS, then the MP4, and says which way it failed if none of them work. hls.js is bundled as a separate file and fetched only when you first play a clip.
 - **Images come from the integration's notification proxy.** If you have that switched off, the card retries through an authenticated signed path.
 - **Corrections on the Frigate+ site do not reach events already stored.** Submitting and relabelling a snapshot trains a future model; it does not change the label on the sighting in the card. The confidence filter is the way to hide a misclassification.
 - **Sub-labels are shown** when Frigate has one, so a classified bird reads "Bird · Dark Eyed Junco".
@@ -152,7 +152,7 @@ On a 7-day range the baseline is only 4 days, so the flags are jumpier there tha
 
 ```bash
 npm install
-npm run build        # esbuild → dist/wildlife-card.js
+npm run build        # esbuild → dist/ (the card, plus hls.js as a lazy chunk)
 node dev/test.mjs    # headless Chromium checks, screenshots in dev/out/
 ```
 

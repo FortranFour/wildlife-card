@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.3 — 2026-11-11
+
+- **Clips play through hls.js**, loaded only the first time a clip is opened. Apple's native player rejected recordings outright — asking for the same 11 MB segment nine times in eight seconds and discarding each complete copy — while Home Assistant's own media browser played the same event, from the same server, over the same connection. The difference was the player, so the card now uses the same library the media browser does.
+- The sources are tried in order: hls.js, then the browser's own HLS, then the MP4, then the notice. Each step falls to the next on failure, so a setup where any one of them works keeps working.
+- The MP4 is now the last resort rather than the default on most browsers. Frigate serves it without byte-range support, so seeking in a long clip never worked well through it.
+
 ## 1.0.2 — 2026-11-11
 
 - **Clips play over HLS where the browser handles it natively** (Safari and the iOS Companion app), using the event stream the Frigate integration serves from the same proxy as the file, and falling back to the MP4 if that fails. Apple devices refuse MP4s that every other browser plays, for reasons that vary — a codec, a range request, a content type — and HLS is the path Frigate's own interface uses, so this routes around the question rather than guessing at it.

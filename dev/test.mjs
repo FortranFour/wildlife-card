@@ -82,12 +82,13 @@ const shot = async (page, name) => {
   await page.click$(".shot");
   check(!!(await page.$("wildlife-card .stage .media")), "a sighting opens on the stage");
   check(/of|\//.test(await page.text$(".stage .pos")), "stage shows its position in the list");
-  /* 3b — a clip the browser cannot play says so, with a direct link.
-     The harness points clips at about:blank, which no browser will play. */
-  page.ignore(/ERR_UNKNOWN_URL_SCHEME/);
+  /* 3b — hls.js is tried first, and a clip nothing can play says so.
+     The harness points clips at about:blank, which no player will accept. */
+  page.ignore(/ERR_UNKNOWN_URL_SCHEME|about:blank|Failed to load/);
   await page.click$('[data-act="clip"]');
-  await page.waitForSelector("wildlife-card .fail", { timeout: 5000 }).catch(() => {});
-  check(!!(await page.$("wildlife-card .fail a")), "an unplayable clip explains itself and offers the file");
+  await page.waitForSelector("wildlife-card .fail", { timeout: 15000 }).catch(() => {});
+  check(await page.$eval("wildlife-card", (c) => !!c._hlsMod), "hls.js is loaded to play the clip");
+  check(!!(await page.$("wildlife-card .fail a")), "a clip no player accepts explains itself and offers the file");
   await page.click$('[data-act="still"]');
 
   await page.click$('[data-act="tune"]');
@@ -106,16 +107,20 @@ const shot = async (page, name) => {
   await page.close();
 }
 
-/* 4b — where HLS is native the clip starts there, then falls back to the file */
+/* 4b — with native HLS claimed as well, every step of the chain is walked:
+   hls.js, then the browser's own HLS, then the file, then the notice. */
 {
   const page = await open("&hls=1");
-  page.ignore(/ERR_UNKNOWN_URL_SCHEME/);
+  page.ignore(/ERR_UNKNOWN_URL_SCHEME|about:blank|Failed to load/);
   await page.click$(".shot");
   await page.click$('[data-act="clip"]');
-  const src = await page.$eval("wildlife-card .media", (v) => v.getAttribute("src")).catch(() => "");
-  check(/\.m3u8$/.test(src) || src === "", "HLS is used where the browser plays it natively");
-  await page.waitForSelector("wildlife-card .fail", { timeout: 5000 }).catch(() => {});
-  check(!!(await page.$("wildlife-card .fail")), "an unplayable HLS stream falls back and then reports");
+  await page.waitForSelector("wildlife-card .fail", { timeout: 15000 }).catch(() => {});
+  const tried = await page.$eval("wildlife-card", (c) => {
+    const v = c.shadowRoot.querySelector("video");
+    return v ? { lib: v.dataset.noLib, native: v.dataset.noNative, mp4: v.dataset.mp4 } : "gone";
+  }).catch(() => "gone");
+  check(tried === "gone", `every source is tried before giving up (${JSON.stringify(tried)})`);
+  check(!!(await page.$("wildlife-card .fail")), "the notice is the last resort, not the first");
   await page.close();
 }
 
