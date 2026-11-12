@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.1 — 2026-11-11
+
+- A clip the browser will not play now says so, instead of leaving a black box. The notice names the failure — interrupted, not fetched, could not be decoded, format not supported — and offers a link to the file itself. The last of those is what an H.265 recording looks like on an Apple device, where Safari and the iOS Companion app refuse a file that other browsers play.
+- The video element preloads metadata only, so opening a sighting no longer starts pulling the whole clip before anything is tapped.
+
 ## 1.0.0 — 2026-11-11
 
 First release.

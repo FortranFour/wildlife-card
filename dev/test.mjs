@@ -39,8 +39,12 @@ async function open(query = "", width = 430) {
     timezoneId: "America/Los_Angeles", locale: "en-US",
   });
   const errors = [];
-  page.on("pageerror", (e) => errors.push(String(e)));
-  page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
+  // Some checks load something on purpose that cannot play; page.ignore() keeps
+  // that one message out of the error check without blinding it to the rest.
+  const ignore = [];
+  const keep = (t) => !ignore.some((re) => re.test(t));
+  page.on("pageerror", (e) => { if (keep(String(e))) errors.push(String(e)); });
+  page.on("console", (m) => { if (m.type() === "error" && keep(m.text())) errors.push(m.text()); });
   await page.goto(`${base}?w=${width}${query}`);
   await page.waitForFunction("window.ready === true");
   await page.waitForSelector("wildlife-card .tile");
@@ -48,6 +52,7 @@ async function open(query = "", width = 430) {
   page.$$c = (sel) => page.$$(`wildlife-card ${sel}`);
   page.click$ = async (sel) => { await page.click(`wildlife-card ${sel}`); await page.waitForTimeout(250); };
   page.text$ = (sel) => page.textContent(`wildlife-card ${sel}`);
+  page.ignore = (re) => ignore.push(re);
   return page;
 }
 const shot = async (page, name) => {
@@ -77,6 +82,14 @@ const shot = async (page, name) => {
   await page.click$(".shot");
   check(!!(await page.$("wildlife-card .stage .media")), "a sighting opens on the stage");
   check(/of|\//.test(await page.text$(".stage .pos")), "stage shows its position in the list");
+  /* 3b — a clip the browser cannot play says so, with a direct link.
+     The harness points clips at about:blank, which no browser will play. */
+  page.ignore(/ERR_UNKNOWN_URL_SCHEME/);
+  await page.click$('[data-act="clip"]');
+  await page.waitForSelector("wildlife-card .fail", { timeout: 5000 }).catch(() => {});
+  check(!!(await page.$("wildlife-card .fail a")), "an unplayable clip explains itself and offers the file");
+  await page.click$('[data-act="still"]');
+
   await page.click$('[data-act="tune"]');
   await shot(page, "rodents-by-time.png");
 

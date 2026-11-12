@@ -121,6 +121,9 @@
     .stage .nav:disabled { opacity:.25; cursor:default; }
     .stage .x { position:absolute; top:8px; right:8px; width:30px; height:30px; border-radius:50%; display:grid; place-items:center; background:rgba(0,0,0,.5); color:#fff; }
     .stage .pos { position:absolute; top:10px; left:10px; padding:2px 9px; border-radius:999px; font-size:11px; font-weight:700; background:rgba(0,0,0,.5); color:#fff; }
+    .fail { display:grid; gap:8px; place-items:center; padding:26px 18px; text-align:center; background:rgba(var(--wl-ink),.04); }
+    .fail p { margin:0; font-size:13px; line-height:18px; color:var(--primary-text-color); }
+    .fail small { font-size:12px; color:var(--secondary-text-color); }
     .cap { display:flex; align-items:center; gap:8px; padding:8px 10px 8px 12px; background:var(--card-background-color,#fff); }
     .cap .t { flex:1; min-width:0; }
     .cap .p { font-size:14px; font-weight:600; line-height:19px; color:var(--primary-text-color); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -422,7 +425,10 @@
         this._$('.tune output').textContent = `${this._ui.min}%`;
         this._render(true);
       });
-      this._root.addEventListener('error', (ev) => { if (ev.target.tagName === 'IMG' && ev.target.dataset.id) this._imgFallback(ev.target); }, true);
+      this._root.addEventListener('error', (ev) => {
+        if (ev.target.tagName === 'IMG' && ev.target.dataset.id) this._imgFallback(ev.target);
+        if (ev.target.tagName === 'VIDEO') this._clipFailed(ev.target);
+      }, true);
       this._root.addEventListener('pointermove', (ev) => this._tip(ev));
       this._root.addEventListener('pointerleave', () => this._tip(null));
       this._render();
@@ -537,7 +543,7 @@
       const e = list[i];
       const still = e.snap ? this._media(e.id, 'snapshot.jpg') : this._thumb(e);
       const media = this._ui.clip && e.clip
-        ? `<video class="media" controls autoplay playsinline muted poster="${esc(still)}" src="${esc(this._media(e.id, 'clip.mp4'))}"></video>`
+        ? `<video class="media" controls autoplay playsinline muted preload="metadata" poster="${esc(still)}" src="${esc(this._media(e.id, 'clip.mp4'))}"></video>`
         : `<img class="media" alt="${esc(this._name(e))}" data-id="${esc(e.id)}" data-kind="${e.snap ? 'snapshot' : 'thumbnail'}" src="${esc(still)}">`;
       const dur = e.end ? Math.max(1, Math.round(e.end - e.start)) : null;
       const meta = [pretty(e.cam), `${Math.round(e.score * 100)}%${e.inferred ? ' as dog' : ''}`, dur ? (dur >= 90 ? `${Math.round(dur / 60)} min` : `${dur}s`) : 'in progress', ...e.zones.slice(0, 2).map(pretty)];
@@ -552,6 +558,21 @@
         </div></div>`;
       this._root.querySelectorAll('.shot').forEach((b) => b.setAttribute('aria-current', String(+b.dataset.i === i)));
       this._root.querySelector('.shot[aria-current="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+    }
+
+    /* Safari and the iOS app refuse a file outright where other browsers play
+       what they can of it, so say which way it failed and offer the direct link. */
+    _clipFailed(v) {
+      const why = {
+        1: ['Loading the clip was interrupted.', 'It may just need another try.'],
+        2: ['The clip could not be fetched.', 'A network or proxy problem rather than the recording itself.'],
+        3: ['This browser could not decode the clip.', 'The recording plays elsewhere but not here — usually its video or audio codec.'],
+        4: ['This browser will not play the clip.', "Its format isn't supported here — H.265 recordings do this on Apple devices."],
+      }[v.error?.code] || ['The clip did not play.', ''];
+      const url = v.getAttribute('src');
+      v.insertAdjacentHTML('afterend', `<div class="fail"><p>${esc(why[0])}</p><small>${esc(why[1])}</small>
+        <a class="pill" target="_blank" rel="noopener" href="${esc(url)}">${svg('open')}Open the file</a></div>`);
+      v.remove();
     }
 
     _tip(ev) {
