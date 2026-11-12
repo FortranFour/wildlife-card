@@ -8,7 +8,7 @@
   reports as Home Assistant's, so the data means the same thing anywhere.
 
   Query string: ?w=430 card width · ?dark=1 dark theme · ?seed=7 data seed
-                ?quiet=1 no coyote pack in the data
+                ?quiet=1 no coyote pack in the data · ?hls=1 claim native HLS
 -->
 <html lang="en">
 <head>
@@ -42,6 +42,8 @@ customElements.define('ha-icon', class extends HTMLElement {
 });
 
 const q = new URLSearchParams(location.search);
+// Pretend to be Safari, which plays HLS without a library, to exercise that path.
+if (q.get('hls')) HTMLMediaElement.prototype.canPlayType = function (t) { return /mpegurl/i.test(t) ? 'maybe' : ''; };
 if (q.get('dark')) document.documentElement.classList.add('dark');
 document.getElementById('host').style.width = `${q.get('w') || 430}px`;
 
@@ -134,7 +136,7 @@ const Card = customElements.get('wildlife-card');
 // Placeholders stand in for the integration's media proxy.
 Card.prototype._media = function (id, file) {
   const e = events.find((x) => x.id === id);
-  return file === 'clip.mp4' ? 'about:blank' : still(e || { label: 'rodent', start_time: now });
+  return file === 'clip.mp4' || file.endsWith('.m3u8') ? 'about:blank' : still(e || { label: 'rodent', start_time: now });
 };
 const el = document.createElement('wildlife-card');
 el.setConfig(JSON.parse(q.get('config') || '{}'));

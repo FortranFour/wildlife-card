@@ -106,6 +106,19 @@ const shot = async (page, name) => {
   await page.close();
 }
 
+/* 4b — where HLS is native the clip starts there, then falls back to the file */
+{
+  const page = await open("&hls=1");
+  page.ignore(/ERR_UNKNOWN_URL_SCHEME/);
+  await page.click$(".shot");
+  await page.click$('[data-act="clip"]');
+  const src = await page.$eval("wildlife-card .media", (v) => v.getAttribute("src")).catch(() => "");
+  check(/\.m3u8$/.test(src) || src === "", "HLS is used where the browser plays it natively");
+  await page.waitForSelector("wildlife-card .fail", { timeout: 5000 }).catch(() => {});
+  check(!!(await page.$("wildlife-card .fail")), "an unplayable HLS stream falls back and then reports");
+  await page.close();
+}
+
 /* 5 — the dog-at-night inference, dark theme, and the location view */
 {
   const page = await open("&dark=1");

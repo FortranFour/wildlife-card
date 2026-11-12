@@ -143,6 +143,7 @@ On a 7-day range the baseline is only 4 days, so the flags are jumpier there tha
 ## Notes and limits
 
 - **History is bounded by Frigate's retention.** The card can only show what Frigate still holds, so the 30-day range is empty beyond your `record` and `snapshots` retention. Sightings older than your snapshot retention fall back to the thumbnail.
+- **Clips play over HLS on Apple devices.** Safari and the iOS Companion app refuse MP4s that other browsers play. Where HLS is native the card uses the event's HLS stream, served by the same proxy, and falls back to the file if that fails. A clip that still will not play says which way it failed and offers the file.
 - **Images come from the integration's notification proxy.** If you have that switched off, the card retries through an authenticated signed path.
 - **Corrections on the Frigate+ site do not reach events already stored.** Submitting and relabelling a snapshot trains a future model; it does not change the label on the sighting in the card. The confidence filter is the way to hide a misclassification.
 - **Sub-labels are shown** when Frigate has one, so a classified bird reads "Bird · Dark Eyed Junco".

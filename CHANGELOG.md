@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.2 — 2026-11-11
+
+- **Clips play over HLS where the browser handles it natively** (Safari and the iOS Companion app), using the event stream the Frigate integration serves from the same proxy as the file, and falling back to the MP4 if that fails. Apple devices refuse MP4s that every other browser plays, for reasons that vary — a codec, a range request, a content type — and HLS is the path Frigate's own interface uses, so this routes around the question rather than guessing at it.
+- The notice no longer blames H.265 when a clip will not play. An H.264 recording with AAC audio fails the same way, so it now says the format or the delivery was refused and points at the file, which says more.
+
 ## 1.0.1 — 2026-11-11
 
 - A clip the browser will not play now says so, instead of leaving a black box. The notice names the failure — interrupted, not fetched, could not be decoded, format not supported — and offers a link to the file itself. The last of those is what an H.265 recording looks like on an Apple device, where Safari and the iOS Companion app refuse a file that other browsers play.

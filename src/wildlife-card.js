@@ -542,8 +542,13 @@
       if (i < 0) { wrap.innerHTML = ''; return; }
       const e = list[i];
       const still = e.snap ? this._media(e.id, 'snapshot.jpg') : this._thumb(e);
+      // Safari and the iOS app reject MP4s that other browsers play. They handle
+      // HLS natively, and the integration serves an event's HLS from the same
+      // proxy, so prefer it where it is native and keep the file as a fallback.
+      const mp4 = this._media(e.id, 'clip.mp4');
+      if (this._nativeHls === undefined) this._nativeHls = !!document.createElement('video').canPlayType('application/vnd.apple.mpegurl');
       const media = this._ui.clip && e.clip
-        ? `<video class="media" controls autoplay playsinline muted preload="metadata" poster="${esc(still)}" src="${esc(this._media(e.id, 'clip.mp4'))}"></video>`
+        ? `<video class="media" controls autoplay playsinline muted preload="metadata" poster="${esc(still)}" src="${esc(this._nativeHls ? this._media(e.id, 'index.m3u8') : mp4)}"${this._nativeHls ? ` data-mp4="${esc(mp4)}"` : ''}></video>`
         : `<img class="media" alt="${esc(this._name(e))}" data-id="${esc(e.id)}" data-kind="${e.snap ? 'snapshot' : 'thumbnail'}" src="${esc(still)}">`;
       const dur = e.end ? Math.max(1, Math.round(e.end - e.start)) : null;
       const meta = [pretty(e.cam), `${Math.round(e.score * 100)}%${e.inferred ? ' as dog' : ''}`, dur ? (dur >= 90 ? `${Math.round(dur / 60)} min` : `${dur}s`) : 'in progress', ...e.zones.slice(0, 2).map(pretty)];
@@ -563,13 +568,19 @@
     /* Safari and the iOS app refuse a file outright where other browsers play
        what they can of it, so say which way it failed and offer the direct link. */
     _clipFailed(v) {
+      if (v.dataset.mp4) {        // HLS did not work here: try the plain file once
+        const url = v.dataset.mp4;
+        delete v.dataset.mp4;
+        v.src = url; v.load(); v.play().catch(() => {});
+        return;
+      }
       const why = {
         1: ['Loading the clip was interrupted.', 'It may just need another try.'],
         2: ['The clip could not be fetched.', 'A network or proxy problem rather than the recording itself.'],
         3: ['This browser could not decode the clip.', 'The recording plays elsewhere but not here — usually its video or audio codec.'],
-        4: ['This browser will not play the clip.', "Its format isn't supported here — H.265 recordings do this on Apple devices."],
+        4: ['This browser would not play the clip.', 'Either the recording\u2019s format or the way the server sent it was refused here. Opening the file usually says more.'],
       }[v.error?.code] || ['The clip did not play.', ''];
-      const url = v.getAttribute('src');
+      const url = v.getAttribute('src');   // the file by now, HLS having been tried first
       v.insertAdjacentHTML('afterend', `<div class="fail"><p>${esc(why[0])}</p><small>${esc(why[1])}</small>
         <a class="pill" target="_blank" rel="noopener" href="${esc(url)}">${svg('open')}Open the file</a></div>`);
       v.remove();
