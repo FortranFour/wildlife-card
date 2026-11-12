@@ -151,16 +151,11 @@ On a 7-day range the baseline is only 4 days, so the flags are jumpier there tha
 
 ```bash
 npm install
-npm run build                 # esbuild → dist/wildlife-card.js
-node dev/test.mjs             # headless Chromium checks + screenshots in dev/out/
-node dev/test.mjs --docs      # also refresh the demo images
+npm run build        # esbuild → dist/wildlife-card.js
+node dev/test.mjs    # headless Chromium checks, screenshots in dev/out/
 ```
 
-`dev/harness.html` renders the built card against generated events with no Home Assistant and no real footage, so anyone can run the card and regenerate its screenshots without a camera. Open it directly by serving the repo root.
-
-![The demo harness](docs/demo/overview-light.png)
-
-*The same card in the harness: synthetic sightings, drawn placeholders instead of camera stills. Screenshots from it land in `docs/demo/`.*
+`dev/harness.html` renders the built card against generated events, with no Home Assistant and no real footage, so the card can be run and tested without a camera. Open it directly by serving the repo root. The checks cover the species tiles, the filters, each grid mode, the sightings browser and the coyote inference; CI keeps the screenshots as an artifact.
 
 ## Credits
 
