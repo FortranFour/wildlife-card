@@ -141,10 +141,6 @@ It also makes the animals sort themselves. Over the same thirty days, 28 of 29 r
 |---|---|
 | ![Rodents by time of day](docs/time-rodents.png) | ![Birds by time of day](docs/time-birds.png) |
 
-Everything together is busiest in the blocks straddling sunrise and sunset, with a mid-afternoon peak between them:
-
-![All wildlife by time of day](docs/time-all.png)
-
 ## What the headline says
 
 In order of precedence:
