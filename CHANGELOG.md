@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.0 — 2026-11-13
+
+- **A visual editor.** Pick the card from the dashboard's card picker and everything but the species groups is a form: title, icon, opening range and confidence, refresh interval, day/night shading, indoor cameras, Frigate instance, and the coyote settings behind a fold. It is built on Home Assistant's own `ha-form`, so it matches the built-in editors rather than approximating them.
+- The camera pickers offer the names **Frigate** uses, read from recent events, because guessing them from entity ids gets the capitalisation wrong and the names are matched exactly when querying. Typing a name that has not been seen lately still works.
+- Species groups stay in YAML — they are a list of lists, and a form makes them harder to read rather than easier. The editor carries them, the card type and any wrapper's own keys through every change untouched, so switching between the form and YAML loses nothing.
+
 ## 1.1.1 — 2026-11-12
 
 - **Every Monday column was narrower than the rest.** The weekly marker was a left margin on the cell, so it took its 2px out of the cell rather than the gap — 5px against 7px on a 30-day phone view, which is a third narrower and plainly visible. The marker is now a hairline drawn in the gap and all columns are identical. The tests measure them.

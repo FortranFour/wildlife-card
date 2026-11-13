@@ -152,6 +152,40 @@ const shot = async (page, name) => {
   await page.close();
 }
 
+/* 4e — the visual editor: defaults shown, camera names found, and every key
+   the form does not manage carried through a change untouched */
+{
+  const page = await open();
+  const r = await page.evaluate(async () => {
+    const editor = customElements.get("wildlife-card").getConfigElement();
+    document.body.appendChild(editor);
+    editor.setConfig({
+      type: "custom:wildlife-card", card_reference_id: "wildlife", days: 30,
+      species: [{ id: "rodent", name: "Rodents", labels: ["rodent"], glyph: "R" }],
+    });
+    editor.hass = window.hass;
+    await new Promise((done) => setTimeout(done, 400));
+    const form = editor.querySelector("ha-form");
+    const cams = form.schema.find((f) => f.name === "indoor_cameras").selector.select.options;
+    let changed = null;
+    editor.addEventListener("config-changed", (ev) => { changed = ev.detail.config; });
+    form.dispatchEvent(new CustomEvent("value-changed", { detail: { value: {
+      ...form.data, title: "Critters", days: "7",
+      coyote: { ...form.data.coyote, start: "22:30:00" },
+    } } }));
+    return { shown: form.data, cams: cams.map((c) => c.value), changed };
+  });
+  check(r.shown.title === "Wildlife" && r.shown.days === "30",
+    `the form opens on the real settings (${r.shown.title}, ${r.shown.days}d)`);
+  check(r.cams.includes("Driveway"), `camera names come from Frigate (${r.cams.slice(0, 3).join(", ")}…)`);
+  check(r.changed.species?.length === 1 && r.changed.card_reference_id === "wildlife"
+    && r.changed.type === "custom:wildlife-card", "species and other keys survive an edit");
+  check(r.changed.days === 7 && r.changed.title === "Critters", "edits are written back in the card's own types");
+  check(r.changed.coyote.start === "22:30", `times are trimmed to hours and minutes (${r.changed.coyote.start})`);
+  check(page.errors.length === 0, `the editor runs without errors (${page.errors.slice(0, 2).join("; ")})`);
+  await page.close();
+}
+
 /* 5 — the dog-at-night inference, dark theme, and the location view */
 {
   const page = await open("&dark=1");

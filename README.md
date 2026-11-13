@@ -10,6 +10,7 @@ A Home Assistant dashboard card for the animals your [Frigate](https://frigate.v
 - **One tile per species**, each showing the best-scoring recent picture, a count for the period and how long ago the last sighting was. Tap one and the sightings browser shows that species alone — and so does the grid, once you switch it to Time or Location.
 - **An activity grid** of days across by species, two-hour block, or camera — so a spate, a nightly pattern or one bad corner of the property stands out. Tap any cell to see just those sightings. The time-of-day view is shaded for daylight, darkness, dawn and dusk, each column by its own date.
 - **A sightings browser**: a filmstrip newest-first, a full snapshot with previous/next, and the clip for any sighting that has one.
+- **A visual editor**, so everything but the species groups can be set from a form.
 - **A confidence filter**, tucked behind the tune icon, to screen out the misclassifications every model produces.
 - **Coyotes without a coyote label.** Frigate+ does not detect coyotes yet, so the card can infer them: a dog on chosen cameras late at night with no person nearby, and two overlapping tracks flagged as a pack.
 - **No helper entities.** The card reads tracked objects straight from the Frigate integration over its websocket API. There is nothing to add to `configuration.yaml`.
@@ -27,7 +28,9 @@ A Home Assistant dashboard card for the animals your [Frigate](https://frigate.v
 
 ## Add the card
 
-Everything is optional:
+Pick *Wildlife Card* from the dashboard's card picker and set it up in the visual editor: title, icon, opening range and confidence, refresh interval, day/night shading, indoor cameras and the coyote settings are all there, and the camera pickers offer the names Frigate itself uses. Species groups stay in YAML, and the editor leaves them — and anything else it does not manage — untouched.
+
+In YAML, everything is optional:
 
 ```yaml
 type: custom:wildlife-card

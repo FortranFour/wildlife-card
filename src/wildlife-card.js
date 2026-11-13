@@ -179,6 +179,8 @@
   class WildlifeCard extends HTMLElement {
     static getStubConfig() { return {}; }
 
+    static getConfigElement() { return document.createElement('wildlife-card-editor'); }
+
     setConfig(config) {
       const c = config || {};
       const coy = c.coyote || {};
@@ -756,7 +758,134 @@
     }
   }
 
+
+  /* ------------------------------------------------------------------ editor
+     A visual editor built on Home Assistant's own ha-form, so it looks and
+     behaves like the built-in cards' editors. Species groups stay in YAML:
+     they are a list of lists, and a form makes them harder to read, not
+     easier. Any key the form does not know about — species, the card type, a
+     wrapper's own keys — is carried through untouched on every change. */
+
+  const FIELDS = {
+    title: ['Title', 'Shown at the top of the card.'],
+    icon: ['Headline icon', 'Used while nothing needs attention; an alert swaps in its own.'],
+    days: ['Opening range', 'Which range the card starts on. You can still switch it on the card.'],
+    refresh: ['Refresh every', 'How often sightings are re-read in the background.'],
+    min_score: ['Opening confidence', 'Sightings below this are hidden until you move the slider on the card.'],
+    sun_shading: ['Day/night shading', 'Shade the time-of-day rows for daylight, darkness, dawn and dusk.'],
+    indoor_cameras: ['Indoor cameras', 'A rodent on these is an alert rather than a sighting.'],
+    instance_id: ['Frigate instance', 'Its MQTT client id. Only matters with more than one Frigate.'],
+    coyote: ['Coyotes', ''],
+    enabled: ['Infer coyotes from night-time dogs', 'Frigate cannot detect a coyote, so a dog alone at night stands in for one.'],
+    cameras: ['Cameras to watch', 'Where a night-time dog counts as a likely coyote.'],
+    start: ['Night starts', ''],
+    end: ['Night ends', ''],
+    person_window: ['Person within', 'A person seen this close in time means the dog was a dog.'],
+  };
+
+  const DEFAULTS = {
+    title: 'Wildlife', icon: 'mdi:binoculars', instance_id: 'frigate', days: 14,
+    min_score: 70, refresh: 300, sun_shading: true, indoor_cameras: ['Attic', 'Crawlspace'],
+    coyote: { enabled: true, cameras: ['Driveway', 'Front'], start: '23:00', end: '05:00', person_window: 120 },
+  };
+
+  const schema = (cameras) => {
+    const pick = { select: { multiple: true, custom_value: true, mode: 'dropdown', options: cameras } };
+    return [
+      { name: 'title', selector: { text: {} } },
+      { name: 'icon', selector: { icon: {} } },
+      { type: 'grid', name: '', schema: [
+        { name: 'days', selector: { select: { mode: 'dropdown', options: [
+          { value: '7', label: '7 days' }, { value: '14', label: '14 days' }, { value: '30', label: '30 days' }] } } },
+        { name: 'refresh', selector: { number: { min: 60, max: 3600, step: 30, mode: 'box', unit_of_measurement: 'seconds' } } },
+      ] },
+      { name: 'min_score', selector: { number: { min: 50, max: 99, step: 1, mode: 'slider', unit_of_measurement: '%' } } },
+      { name: 'sun_shading', selector: { boolean: {} } },
+      { name: 'indoor_cameras', selector: pick },
+      { name: 'instance_id', selector: { text: {} } },
+      { type: 'expandable', name: 'coyote', title: FIELDS.coyote[0], icon: 'mdi:paw', schema: [
+        { name: 'enabled', selector: { boolean: {} } },
+        { name: 'cameras', selector: pick },
+        { type: 'grid', name: '', schema: [
+          { name: 'start', selector: { time: {} } },
+          { name: 'end', selector: { time: {} } },
+        ] },
+        { name: 'person_window', selector: { number: { min: 0, max: 900, step: 10, mode: 'box', unit_of_measurement: 'seconds' } } },
+      ] },
+    ];
+  };
+
+  const clock = (v) => (v ? String(v).split(':').slice(0, 2).map((n) => n.padStart(2, '0')).join(':') : v);
+
+  class WildlifeCardEditor extends HTMLElement {
+    setConfig(config) { this._config = config || {}; this._render(); }
+
+    set hass(hass) {
+      const first = !this._hass;
+      this._hass = hass;
+      if (first) this._findCameras();
+      this._render();
+    }
+
+    /* The camera names Frigate itself uses, read from recent events so they
+       match exactly — guessing them from entity ids gets the case wrong. */
+    async _findCameras() {
+      try {
+        const res = await this._hass.callWS({
+          type: 'frigate/events/get',
+          instance_id: this._config?.instance_id || 'frigate',
+          after: Math.floor(Date.now() / 1000) - 7 * 86400,
+          limit: 500,
+        });
+        const events = typeof res === 'string' ? JSON.parse(res) : res || [];
+        const names = [...new Set(events.map((e) => e.camera).filter(Boolean))].sort();
+        if (names.length) { this._cameras = names.map((c) => ({ value: c, label: pretty(c) })); this._render(); }
+      } catch (err) { /* the names can still be typed */ }
+    }
+
+    _data() {
+      const c = this._config || {};
+      return {
+        ...DEFAULTS, ...c,
+        days: String(c.days ?? DEFAULTS.days),
+        coyote: { ...DEFAULTS.coyote, ...(c.coyote || {}) },
+      };
+    }
+
+    _changed(ev) {
+      ev.stopPropagation();
+      const v = ev.detail.value;
+      const config = {
+        ...this._config, ...v,
+        days: +v.days,
+        coyote: { ...v.coyote, start: clock(v.coyote?.start), end: clock(v.coyote?.end) },
+      };
+      this.dispatchEvent(new CustomEvent('config-changed', { detail: { config }, bubbles: true, composed: true }));
+    }
+
+    _render() {
+      if (!this._hass || !this._config) return;
+      if (!this._form) {
+        const note = document.createElement('ha-alert');
+        note.setAttribute('alert-type', 'info');
+        note.textContent = 'Species groups are edited in YAML. Anything set here is kept when you switch.';
+        note.style.display = 'block';
+        note.style.marginBottom = '12px';
+        this.appendChild(note);
+        this._form = document.createElement('ha-form');
+        this._form.addEventListener('value-changed', (ev) => this._changed(ev));
+        this.appendChild(this._form);
+      }
+      this._form.hass = this._hass;
+      this._form.schema = schema(this._cameras || []);
+      this._form.data = this._data();
+      this._form.computeLabel = (s) => FIELDS[s.name]?.[0] || pretty(s.name);
+      this._form.computeHelper = (s) => FIELDS[s.name]?.[1] || '';
+    }
+  }
+
   if (!customElements.get('wildlife-card')) customElements.define('wildlife-card', WildlifeCard);
+  if (!customElements.get('wildlife-card-editor')) customElements.define('wildlife-card-editor', WildlifeCardEditor);
   window.customCards = window.customCards || [];
   if (!window.customCards.some((c) => c.type === 'wildlife-card')) {
     window.customCards.push({ type: 'wildlife-card', name: 'Wildlife Card', description: 'Frigate wildlife activity, trends and sightings browser.', preview: false });

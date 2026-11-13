@@ -128,7 +128,7 @@ const hass = {
     if (msg.type !== 'frigate/events/get') throw new Error(`unexpected ws call: ${msg.type}`);
     calls++;
     return JSON.stringify(events.filter((e) =>
-      msg.labels.includes(e.label)
+      (!msg.labels || msg.labels.includes(e.label))
       && (!msg.cameras || msg.cameras.includes(e.camera))
       && e.start_time >= (msg.after || 0)
       && e.start_time <= (msg.before || 1e12)).slice(0, msg.limit || 100));
@@ -147,6 +147,7 @@ el.setConfig(JSON.parse(q.get('config') || '{}'));
 el.hass = hass;
 document.getElementById('host').appendChild(el);
 window.card = el;
+window.hass = hass;   // the config editor is handed this directly in tests
 window.wsCalls = () => calls;
 window.ready = true;
 </script>
