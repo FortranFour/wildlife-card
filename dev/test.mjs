@@ -31,8 +31,9 @@ const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePa
 const failures = [];
 const check = (ok, what) => { console.log(`${ok ? "  ok  " : "FAIL  "}${what}`); if (!ok) failures.push(what); };
 
-async function open(query = "", width = 430) {
+async function open(query = "", width = 430, userAgent) {
   const page = await browser.newPage({
+    ...(userAgent ? { userAgent } : {}),
     viewport: { width: width + 32, height: 1000 }, deviceScaleFactor: 2,
     // Pinned so the generated night-time events and the screenshots are the
     // same on any machine, whatever the runner's time zone.
@@ -268,6 +269,22 @@ const shot = async (page, name) => {
   const [direct, , id2] = await href("&config=" + encodeURIComponent('{"frigate_url":"http://192.168.1.10:5000/"}'));
   check(direct === `http://192.168.1.10:5000/explore?event_id=${id2}`,
     `a plain address loses its trailing slash rather than doubling it (${direct})`);
+
+  // Ingress wants a cookie the system browser does not have, so inside the
+  // Companion app the add-on's link must stay in the same view.
+  {
+    const APP = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Home Assistant/2026.10 (io.robbie.HomeAssistant; build:2026.1; iOS 18.0)";
+    const inApp = async (cfg) => {
+      const page = await open("&config=" + encodeURIComponent(cfg), 430, APP);
+      await page.click$(".shot");
+      await page.waitForSelector(`wildlife-card ${SEL}`);
+      const tgt = await page.evaluate((s) => window.card.shadowRoot.querySelector(s).getAttribute("target"), SEL);
+      await page.close();
+      return tgt;
+    };
+    check((await inApp('{"frigate_addon":"ccab4aaf_frigate-fa"}')) === null, "in the Companion app an add-on's Frigate opens in the same view");
+    check((await inApp('{"frigate_url":"http://192.168.1.10:5000"}')) === "_blank", "while a plain address still gets its own tab there");
+  }
 
   // An add-on that is not there should say so rather than offer a dead link.
   const page = await open("&config=" + encodeURIComponent('{"frigate_addon":"not_installed"}'));

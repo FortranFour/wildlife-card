@@ -440,6 +440,17 @@
       return '';
     }
 
+    /* Ingress accepts nothing but a session cookie, and the Companion apps
+       open a new-tab link in the system browser, which keeps its own cookies:
+       the link arrives with no session and the Supervisor answers 401. Inside
+       the apps an add-on's Frigate therefore opens in the same view, where
+       the cookie lives. A plain address has Frigate's own login and can go to
+       a new tab anywhere. */
+    _frigateHere() {
+      if (this._cfg.frigate.url) return false;
+      return /Home Assistant\//.test(navigator.userAgent) || !!window.externalApp || !!window.webkit?.messageHandlers?.externalBus;
+    }
+
     _frigateLink(id) {
       const base = this._frigateOn() ? this._frigateBase() : '';
       return base ? `${base}/explore?event_id=${encodeURIComponent(id)}` : '';
@@ -725,7 +736,7 @@
         <span class="pos">${i + 1} / ${list.length}</span>
         <div class="cap"><div class="t"><div class="p">${esc(this._name(e))}</div><div class="s">${esc([this._when(e.start), ...meta].join(' · '))}</div></div>
           ${e.clip ? (this._ui.clip ? `<button class="pill" data-act="still">${svg('image')}Photo</button>` : `<button class="pill" data-act="clip">${svg('play')}Video</button>`) : ''}
-          ${frig ? `<a class="pill ghost" target="_blank" rel="noopener" href="${esc(frig)}" title="Open this sighting in Frigate" aria-label="Open this sighting in Frigate">${svg('find')}</a>` : ''}
+          ${frig ? `<a class="pill ghost" ${this._frigateHere() ? '' : 'target="_blank" rel="noopener" '}href="${esc(frig)}" title="Open this sighting in Frigate" aria-label="Open this sighting in Frigate">${svg('find')}</a>` : ''}
           ${away ? `<a class="pill ghost" target="_blank" rel="noopener" href="${esc(away)}" title="Open the picture in a new tab" aria-label="Open the picture in a new tab">${svg('open')}</a>` : ''}
         </div>${this._fb?.err ? `<div class="err">${esc(this._fb.err)}</div>` : ''}</div>`;
       const video = wrap.querySelector('video');

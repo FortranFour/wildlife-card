@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.3 — 2026-11-14
+
+- **The Frigate button returned 401 in the Companion apps.** Ingress accepts nothing but a session cookie, and the apps hand a new-tab link to the system browser, which keeps its own cookies — so the link arrived with no session, and the Supervisor's log said as much. Inside the apps an add-on's Frigate now opens in the same view, where the cookie is; go back to return to the dashboard. Desktop browsers and a plain `frigate_url` keep the new tab.
+- 1.3.2 blamed this 401 on the picture link. The log shows that was wrong; its signing is harmless and stays.
+
 ## 1.3.2 — 2026-11-14
 
 - **Opening the picture in a new tab returned 401.** The frontend keeps its token in script rather than in a cookie, so none of Home Assistant's credentials travel to a tab opened beside it, and a bare proxy address arrives unauthenticated. Inside the card the pictures still appear because a failed load quietly retries through a signed path; a link has no such second chance. The link now carries the signed path from the start, which satisfies the proxy whether or not it demands authentication, and settles the notification proxy's expiry option at the same time.
