@@ -231,12 +231,12 @@ const shot = async (page, name) => {
   // the browser a picture, which every browser can show, on every platform.
   const page = await open();
   await page.click$(".shot");
-  const [href, shown] = await page.$eval("wildlife-card", (c) => [
-    c.shadowRoot.querySelector(".cap a").getAttribute("href"),
-    c.shadowRoot.querySelector(".stage .media").getAttribute("src"),
-  ]);
-  check(href === shown, "the open button offers the picture on the stage, not the clip");
-  check(!/\.mp4|m3u8/.test(href), `the open button never hands out a clip (${href.slice(0, 24)}…)`);
+  await page.waitForSelector('wildlife-card .cap a[aria-label="Open the picture in a new tab"]');
+  const href = await page.$eval('wildlife-card .cap a[aria-label="Open the picture in a new tab"]', (a) => a.getAttribute("href"));
+  check(/snapshot\.jpg|thumbnail\.jpg/.test(href), `the open button offers the picture, not the clip (${href.slice(0, 48)}…)`);
+  check(!/\.mp4|m3u8/.test(href), "the open button never hands out a clip");
+  // Nothing of the frontend's own credentials travels to a new tab.
+  check(/authSig=/.test(href), "and it is signed, so it survives leaving the frontend");
   check(!(await page.$('wildlife-card [data-act="frigate"]')), "no Frigate button until one is configured");
   await page.close();
 }

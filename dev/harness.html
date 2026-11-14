@@ -131,6 +131,8 @@ const hass = {
       return { name: 'Frigate', slug: msg.slug, ingress_url: '/api/hassio_ingress/TOKEN-OF-THE-MOMENT/' };
     }
     if (msg.type === 'supervisor/ingress/session') return { session: 'a-session' };
+    // Home Assistant signs a path so it can be opened outside the frontend.
+    if (msg.type === 'auth/sign_path') return { path: `${msg.path}?authSig=SIGNED` };
     if (msg.type !== 'frigate/events/get') throw new Error(`unexpected ws call: ${msg.type}`);
     calls++;
     return JSON.stringify(events.filter((e) =>

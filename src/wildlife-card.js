@@ -411,6 +411,35 @@
       return have ? have.base : null;
     }
 
+    /* The picture opens in a separate browser context, where none of Home
+       Assistant's credentials travel: the frontend holds its token in script,
+       not in a cookie, so a bare proxy URL arrives unauthenticated and can be
+       refused. The link therefore carries a signed path, which satisfies the
+       proxy whether or not it demands authentication, and settles the
+       notification proxy's expiry option at the same time. */
+    _signed(e) {
+      const key = `${e.id}:${e.snap ? 'snapshot' : 'thumbnail'}`;
+      if (this._sig?.key === key && Date.now() - this._sig.at < 1800000) return this._sig.url;
+      if (this._sigWait !== key) {
+        this._sigWait = key;
+        (async () => {
+          let url = '';
+          try {
+            const r = await this._hass.callWS({
+              type: 'auth/sign_path',
+              path: `/api/frigate/${this._cfg.instance}/notifications/${e.id}/${e.snap ? 'snapshot.jpg' : 'thumbnail.jpg'}`,
+              expires: 3600,
+            });
+            url = this._hass.hassUrl(r.path);
+          } catch (err) { /* the picture is on the stage either way */ }
+          this._sig = { key, url, at: Date.now() };
+          if (this._sigWait === key) this._sigWait = null;
+          if (this._ui.cur === e.id) this._stage();
+        })();
+      }
+      return '';
+    }
+
     _frigateLink(id) {
       const base = this._frigateOn() ? this._frigateBase() : '';
       return base ? `${base}/explore?event_id=${encodeURIComponent(id)}` : '';
@@ -683,6 +712,7 @@
       const e = list[i];
       const still = e.snap ? this._media(e.id, 'snapshot.jpg') : this._thumb(e);
       const frig = this._frigateLink(e.id);
+      const away = this._signed(e);
       const media = this._ui.clip && e.clip
         ? `<video class="media" controls playsinline muted preload="metadata" poster="${esc(still)}" data-hls="${esc(this._media(e.id, 'index.m3u8'))}" data-mp4="${esc(this._media(e.id, 'clip.mp4'))}"></video>`
         : `<img class="media" alt="${esc(this._name(e))}" data-id="${esc(e.id)}" data-kind="${e.snap ? 'snapshot' : 'thumbnail'}" src="${esc(still)}">`;
@@ -696,7 +726,7 @@
         <div class="cap"><div class="t"><div class="p">${esc(this._name(e))}</div><div class="s">${esc([this._when(e.start), ...meta].join(' · '))}</div></div>
           ${e.clip ? (this._ui.clip ? `<button class="pill" data-act="still">${svg('image')}Photo</button>` : `<button class="pill" data-act="clip">${svg('play')}Video</button>`) : ''}
           ${frig ? `<a class="pill ghost" target="_blank" rel="noopener" href="${esc(frig)}" title="Open this sighting in Frigate" aria-label="Open this sighting in Frigate">${svg('find')}</a>` : ''}
-          <a class="pill ghost" target="_blank" rel="noopener" href="${esc(still)}" title="Open the picture in a new tab" aria-label="Open the picture in a new tab">${svg('open')}</a>
+          ${away ? `<a class="pill ghost" target="_blank" rel="noopener" href="${esc(away)}" title="Open the picture in a new tab" aria-label="Open the picture in a new tab">${svg('open')}</a>` : ''}
         </div>${this._fb?.err ? `<div class="err">${esc(this._fb.err)}</div>` : ''}</div>`;
       const video = wrap.querySelector('video');
       if (video) this._attachMedia(video);

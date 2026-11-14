@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.2 — 2026-11-14
+
+- **Opening the picture in a new tab returned 401.** The frontend keeps its token in script rather than in a cookie, so none of Home Assistant's credentials travel to a tab opened beside it, and a bare proxy address arrives unauthenticated. Inside the card the pictures still appear because a failed load quietly retries through a signed path; a link has no such second chance. The link now carries the signed path from the start, which satisfies the proxy whether or not it demands authentication, and settles the notification proxy's expiry option at the same time.
+
 ## 1.3.1 — 2026-11-14
 
 - **The Frigate button did nothing in the iOS Companion app.** It opened a blank tab, resolved the address, then navigated that tab — and the app's web view never arrives at a tab that script opened and then sent somewhere after an await. The same shape of problem as the clips. It is now an ordinary link with its address already in place, which is why the snapshot arrow beside it always worked.
