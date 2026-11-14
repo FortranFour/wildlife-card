@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.0 — 2026-11-14
+
+- **The open button offers the picture, not the clip.** It used to hand the browser Frigate's `clip.mp4` whenever a sighting had one, which on an iPhone opens the player that refuses that file: Frigate serves it without byte-range support, and Apple's player answers by fetching the whole thing over and over and discarding each copy. In the card a clip plays because hls.js is doing the work; a new tab has no such help. The button now opens the snapshot, which every browser on every platform can show, and clips stay with the player that can play them.
+- **A button that opens the sighting in Frigate**, off unless you configure it. It lands on the Explore view with that tracked object selected, which is where its lifecycle, its labels and — for Frigate+ subscribers — submission live.
+- Behind ingress the token in the address is reissued whenever the add-on restarts, so `frigate_addon` takes the add-on's slug and the card reads the current address when you tap, mints a session the way Home Assistant's own add-on panel does, and never stores either. `frigate_url` covers a Frigate that runs outside the Supervisor.
+
 ## 1.2.0 — 2026-11-13
 
 - **A visual editor.** Pick the card from the dashboard's card picker and everything but the species groups is a form: title, icon, opening range and confidence, refresh interval, day/night shading, indoor cameras, Frigate instance, and the coyote settings behind a fold. It is built on Home Assistant's own `ha-form`, so it matches the built-in editors rather than approximating them.

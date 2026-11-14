@@ -225,6 +225,61 @@ const shot = async (page, name) => {
   await page.close();
 }
 
+/* 8 — where the two links outside the card go */
+{
+  // Apple's player refuses Frigate's range-less MP4, so the open button hands
+  // the browser a picture, which every browser can show, on every platform.
+  const page = await open();
+  await page.click$(".shot");
+  const [href, shown] = await page.$eval("wildlife-card", (c) => [
+    c.shadowRoot.querySelector(".cap a").getAttribute("href"),
+    c.shadowRoot.querySelector(".stage .media").getAttribute("src"),
+  ]);
+  check(href === shown, "the open button offers the picture on the stage, not the clip");
+  check(!/\.mp4|m3u8/.test(href), `the open button never hands out a clip (${href.slice(0, 24)}…)`);
+  check(!(await page.$('wildlife-card [data-act="frigate"]')), "no Frigate button until one is configured");
+  await page.close();
+}
+
+/* 9 — the Frigate button, through ingress and through a plain address */
+{
+  const spy = (page) => page.evaluate(() => {
+    window.opened = [];
+    window.open = (url) => {
+      window.opened.push(url);
+      return { set opener(v) {}, location: { replace: (u) => window.opened.push(u) }, close() { window.opened.push("closed"); } };
+    };
+  });
+  const url = async (query) => {
+    const page = await open(query);
+    await spy(page);
+    await page.click$(".shot");
+    await page.click$('[data-act="frigate"]');
+    await page.waitForFunction("window.opened.length > 1");
+    const [opened, id] = await page.evaluate(() => [window.opened, window.card._ui.cur]);
+    await page.close();
+    return [opened.at(-1), id];
+  };
+
+  const [ingress, id] = await url("&config=" + encodeURIComponent('{"frigate_addon":"ccab4aaf_frigate-fa"}'));
+  check(ingress === `/api/hassio_ingress/TOKEN-OF-THE-MOMENT/explore?event_id=${id}`,
+    `an add-on resolves its ingress token when tapped (${ingress})`);
+
+  const [direct, id2] = await url("&config=" + encodeURIComponent('{"frigate_url":"http://192.168.1.10:5000/"}'));
+  check(direct === `http://192.168.1.10:5000/explore?event_id=${id2}`,
+    `a plain address loses its trailing slash rather than doubling it (${direct})`);
+
+  // An add-on that is not there should say so rather than open a blank tab.
+  const page = await open("&config=" + encodeURIComponent('{"frigate_addon":"not_installed"}'));
+  await spy(page);
+  await page.click$(".shot");
+  await page.click$('[data-act="frigate"]');
+  await page.waitForSelector("wildlife-card .stage .err");
+  check((await page.text$(".stage .err")).includes("could not be opened"), "a Frigate that cannot be reached explains itself");
+  check((await page.evaluate(() => window.opened)).at(-1) === "closed", "and the blank tab it opened is closed again");
+  await page.close();
+}
+
 await browser.close();
 server.close();
 console.log(failures.length ? `\n${failures.length} check(s) failed` : `\nall checks passed — screenshots in dev/out/`);

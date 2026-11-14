@@ -50,6 +50,7 @@
     play: 'M8,5.14V19.14L19,12.14L8,5.14Z',
     image: 'M8.5,13.5L11,16.5L14.5,12L19,18H5M21,19V5C21,3.89 20.1,3 19,3H5A2,2 0 0,0 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19Z',
     open: 'M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z',
+    find: 'M9.5,3A6.5,6.5 0 0,1 16,9.5C16,11.11 15.41,12.59 14.44,13.73L14.71,14H15.5L20.5,19L19,20.5L14,15.5V14.71L13.73,14.44C12.59,15.41 11.11,16 9.5,16A6.5,6.5 0 0,1 3,9.5A6.5,6.5 0 0,1 9.5,3M9.5,5C7,5 5,7 5,9.5C5,12 7,14 9.5,14C12,14 14,12 14,9.5C14,7 12,5 9.5,5Z',
   };
   const svg = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${ICON[name]}"/></svg>`;
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -191,6 +192,7 @@
         refresh: Math.max(60, +c.refresh || 300),
         sun: c.sun_shading !== false,
         indoor: (c.indoor_cameras || ['Attic', 'Crawlspace']).map((s) => s.toLowerCase()),
+        frigate: { url: String(c.frigate_url || '').replace(/\/+$/, ''), addon: String(c.frigate_addon || '').trim() },
         species: (Array.isArray(c.species) && c.species.length ? c.species : DEFAULT_SPECIES).map((s) => ({
           id: s.id, name: s.name || pretty(s.id), one: s.one || (s.name || pretty(s.id)).replace(/e?s$/, ''),
           labels: s.labels || [s.id], glyph: s.glyph || '🐾',
@@ -207,7 +209,7 @@
         days: [7, 14, 30].includes(saved.days) ? saved.days : ([7, 14, 30].includes(+c.days) ? +c.days : 14),
         view: ['species', 'hour', 'camera'].includes(saved.view) ? saved.view : 'species',
         min: Number.isFinite(saved.min) ? saved.min : Math.min(99, Math.max(50, +c.min_score || 70)),
-        sp: null, cell: null, tune: false, cur: null, clip: false, limit: 60,
+        sp: null, cell: null, tune: false, cur: null, clip: false, note: null, limit: 60,
       };
       this._events = new Map();
       this._people = new Map();
@@ -371,6 +373,42 @@
         const r = await this._hass.callWS({ type: 'auth/sign_path', path: `/api/frigate/${this._cfg.instance}/${kind}/${img.dataset.id}`, expires: 3600 });
         img.src = this._hass.hassUrl(r.path);
       } catch (e) { img.remove(); }
+    }
+
+    _frigateOn() { return !!(this._cfg.frigate.url || this._cfg.frigate.addon); }
+
+    /* The sighting in Frigate's own Explore view, which is where its lifecycle,
+       its labels and — for subscribers — Frigate+ submission live. Behind
+       ingress the token in the path is reissued whenever the add-on restarts,
+       so it is read fresh on every tap rather than stored, and a session is
+       minted exactly as Home Assistant's own add-on panel does. */
+    async _frigateUrl(id) {
+      const f = this._cfg.frigate;
+      let base = f.url;
+      if (!base) {
+        const info = await this._hass.callWS({ type: 'supervisor/ingress/info', slug: f.addon });
+        const entry = /^(\/api\/hassio_ingress\/[^/]+)/.exec(info?.ingress_url || '');
+        if (!entry) throw new Error(`the ${f.addon} add-on is not serving a page`);
+        const s = await this._hass.callWS({ type: 'supervisor/ingress/session', slug: f.addon });
+        if (s?.session) document.cookie = `ingress_session=${s.session};path=/api/hassio_ingress/;SameSite=Strict${location.protocol === 'https:' ? ';Secure' : ''}`;
+        base = this._hass.hassUrl(entry[1]);
+      }
+      return `${base}/explore?event_id=${encodeURIComponent(id)}`;
+    }
+
+    /* The tab is opened on the tap itself, because a tab opened after an await
+       has lost the gesture a pop-up blocker looks for. */
+    async _openFrigate(id) {
+      const tab = window.open('about:blank', '_blank');
+      if (tab) tab.opener = null;
+      try {
+        const url = await this._frigateUrl(id);
+        if (tab) tab.location.replace(url); else window.open(url, '_blank', 'noopener');
+      } catch (err) {
+        tab?.close();
+        this._ui.note = `Frigate could not be opened: ${err?.message || err}.`;
+        this._stage();
+      }
     }
 
     /* ---------- derived ---------- */
@@ -650,8 +688,9 @@
         <span class="pos">${i + 1} / ${list.length}</span>
         <div class="cap"><div class="t"><div class="p">${esc(this._name(e))}</div><div class="s">${esc([this._when(e.start), ...meta].join(' · '))}</div></div>
           ${e.clip ? (this._ui.clip ? `<button class="pill" data-act="still">${svg('image')}Photo</button>` : `<button class="pill" data-act="clip">${svg('play')}Video</button>`) : ''}
-          <a class="pill ghost" target="_blank" rel="noopener" href="${esc(e.clip ? this._media(e.id, 'clip.mp4') : still)}" title="Open in a new tab" aria-label="Open in a new tab">${svg('open')}</a>
-        </div></div>`;
+          ${this._frigateOn() ? `<button class="pill ghost" data-act="frigate" title="Open this sighting in Frigate" aria-label="Open this sighting in Frigate">${svg('find')}</button>` : ''}
+          <a class="pill ghost" target="_blank" rel="noopener" href="${esc(still)}" title="Open the picture in a new tab" aria-label="Open the picture in a new tab">${svg('open')}</a>
+        </div>${this._ui.note ? `<div class="err">${esc(this._ui.note)}</div>` : ''}</div>`;
       const video = wrap.querySelector('video');
       if (video) this._attachMedia(video);
       this._root.querySelectorAll('.shot').forEach((b) => b.setAttribute('aria-current', String(+b.dataset.i === i)));
@@ -744,8 +783,9 @@
         }
         case 'cellx': u.cell = null; u.cur = null; break;
         case 'more': u.limit += 120; break;
-        case 'open': { const e = this._list[+b.dataset.i]; u.cur = u.cur === e.id ? null : e.id; u.clip = false; stageOnly = true; break; }
-        case 'step': { const i = this._list.findIndex((e) => e.id === u.cur) + +v; if (this._list[i]) { u.cur = this._list[i].id; u.clip = false; } stageOnly = true; break; }
+        case 'open': { const e = this._list[+b.dataset.i]; u.cur = u.cur === e.id ? null : e.id; u.clip = false; u.note = null; stageOnly = true; break; }
+        case 'step': { const i = this._list.findIndex((e) => e.id === u.cur) + +v; if (this._list[i]) { u.cur = this._list[i].id; u.clip = false; u.note = null; } stageOnly = true; break; }
+        case 'frigate': this._openFrigate(u.cur); return;
         case 'close': u.cur = null; stageOnly = true; break;
         case 'clip': u.clip = true; stageOnly = true; break;
         case 'still': u.clip = false; stageOnly = true; break;
@@ -775,6 +815,8 @@
     sun_shading: ['Day/night shading', 'Shade the time-of-day rows for daylight, darkness, dawn and dusk.'],
     indoor_cameras: ['Indoor cameras', 'A rodent on these is an alert rather than a sighting.'],
     instance_id: ['Frigate instance', 'Its MQTT client id. Only matters with more than one Frigate.'],
+    frigate_addon: ['Frigate add-on', 'Its slug, for a Frigate running as an add-on. Adds a button that opens the sighting in Frigate.'],
+    frigate_url: ['Frigate address', 'For a Frigate that is not an add-on, e.g. http://192.168.1.10:5000. Used in preference to the slug.'],
     coyote: ['Coyotes', ''],
     enabled: ['Infer coyotes from night-time dogs', 'Frigate cannot detect a coyote, so a dog alone at night stands in for one.'],
     cameras: ['Cameras to watch', 'Where a night-time dog counts as a likely coyote.'],
@@ -803,6 +845,10 @@
       { name: 'sun_shading', selector: { boolean: {} } },
       { name: 'indoor_cameras', selector: pick },
       { name: 'instance_id', selector: { text: {} } },
+      { type: 'grid', name: '', schema: [
+        { name: 'frigate_addon', selector: { text: {} } },
+        { name: 'frigate_url', selector: { text: {} } },
+      ] },
       { type: 'expandable', name: 'coyote', title: FIELDS.coyote[0], icon: 'mdi:paw', schema: [
         { name: 'enabled', selector: { boolean: {} } },
         { name: 'cameras', selector: pick },
@@ -860,6 +906,8 @@
         days: +v.days,
         coyote: { ...v.coyote, start: clock(v.coyote?.start), end: clock(v.coyote?.end) },
       };
+      /* An emptied text field should leave no key behind. */
+      for (const k of ['frigate_addon', 'frigate_url']) if (!config[k]) delete config[k];
       this.dispatchEvent(new CustomEvent('config-changed', { detail: { config }, bubbles: true, composed: true }));
     }
 

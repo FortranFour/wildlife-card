@@ -125,6 +125,12 @@ const hass = {
   locale: { language: 'en' },
   hassUrl: (p) => p,
   async callWS(msg) {
+    // Supervisor stands in for an add-on behind ingress, reissuing its token.
+    if (msg.type === 'supervisor/ingress/info') {
+      if (msg.slug !== 'ccab4aaf_frigate-fa') throw new Error('Add-on not found');
+      return { name: 'Frigate', slug: msg.slug, ingress_url: '/api/hassio_ingress/TOKEN-OF-THE-MOMENT/' };
+    }
+    if (msg.type === 'supervisor/ingress/session') return { session: 'a-session' };
     if (msg.type !== 'frigate/events/get') throw new Error(`unexpected ws call: ${msg.type}`);
     calls++;
     return JSON.stringify(events.filter((e) =>
