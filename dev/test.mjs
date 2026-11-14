@@ -241,42 +241,40 @@ const shot = async (page, name) => {
   await page.close();
 }
 
-/* 9 — the Frigate button, through ingress and through a plain address */
+/* 9 — the Frigate link, through ingress and through a plain address.
+   It has to be a real anchor with its address already in place: the iOS
+   Companion app never arrives at a tab that script opened and then navigated
+   after an await, which is how the first version of this lost the sighting. */
 {
-  const spy = (page) => page.evaluate(() => {
-    window.opened = [];
-    window.open = (url) => {
-      window.opened.push(url);
-      return { set opener(v) {}, location: { replace: (u) => window.opened.push(u) }, close() { window.opened.push("closed"); } };
-    };
-  });
-  const url = async (query) => {
+  const SEL = 'a[aria-label="Open this sighting in Frigate"]';
+  const href = async (query) => {
     const page = await open(query);
-    await spy(page);
     await page.click$(".shot");
-    await page.click$('[data-act="frigate"]');
-    await page.waitForFunction("window.opened.length > 1");
-    const [opened, id] = await page.evaluate(() => [window.opened, window.card._ui.cur]);
+    await page.waitForSelector(`wildlife-card ${SEL}`);
+    const out = await page.evaluate((s) => [
+      window.card.shadowRoot.querySelector(s).getAttribute("href"),
+      window.card.shadowRoot.querySelector(s).getAttribute("target"),
+      window.card._ui.cur,
+    ], SEL);
     await page.close();
-    return [opened.at(-1), id];
+    return out;
   };
 
-  const [ingress, id] = await url("&config=" + encodeURIComponent('{"frigate_addon":"ccab4aaf_frigate-fa"}'));
+  const [ingress, target, id] = await href("&config=" + encodeURIComponent('{"frigate_addon":"ccab4aaf_frigate-fa"}'));
   check(ingress === `/api/hassio_ingress/TOKEN-OF-THE-MOMENT/explore?event_id=${id}`,
-    `an add-on resolves its ingress token when tapped (${ingress})`);
+    `an add-on resolves its ingress address before the tap (${ingress})`);
+  check(target === "_blank", "and it is an ordinary link the app can open");
 
-  const [direct, id2] = await url("&config=" + encodeURIComponent('{"frigate_url":"http://192.168.1.10:5000/"}'));
+  const [direct, , id2] = await href("&config=" + encodeURIComponent('{"frigate_url":"http://192.168.1.10:5000/"}'));
   check(direct === `http://192.168.1.10:5000/explore?event_id=${id2}`,
     `a plain address loses its trailing slash rather than doubling it (${direct})`);
 
-  // An add-on that is not there should say so rather than open a blank tab.
+  // An add-on that is not there should say so rather than offer a dead link.
   const page = await open("&config=" + encodeURIComponent('{"frigate_addon":"not_installed"}'));
-  await spy(page);
   await page.click$(".shot");
-  await page.click$('[data-act="frigate"]');
   await page.waitForSelector("wildlife-card .stage .err");
-  check((await page.text$(".stage .err")).includes("could not be opened"), "a Frigate that cannot be reached explains itself");
-  check((await page.evaluate(() => window.opened)).at(-1) === "closed", "and the blank tab it opened is closed again");
+  check((await page.text$(".stage .err")).includes("could not be reached"), "a Frigate that cannot be reached explains itself");
+  check(!(await page.$(`wildlife-card ${SEL}`)), "and offers no link at all rather than a broken one");
   await page.close();
 }
 

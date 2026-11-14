@@ -209,7 +209,7 @@
         days: [7, 14, 30].includes(saved.days) ? saved.days : ([7, 14, 30].includes(+c.days) ? +c.days : 14),
         view: ['species', 'hour', 'camera'].includes(saved.view) ? saved.view : 'species',
         min: Number.isFinite(saved.min) ? saved.min : Math.min(99, Math.max(50, +c.min_score || 70)),
-        sp: null, cell: null, tune: false, cur: null, clip: false, note: null, limit: 60,
+        sp: null, cell: null, tune: false, cur: null, clip: false, limit: 60,
       };
       this._events = new Map();
       this._people = new Map();
@@ -377,38 +377,43 @@
 
     _frigateOn() { return !!(this._cfg.frigate.url || this._cfg.frigate.addon); }
 
-    /* The sighting in Frigate's own Explore view, which is where its lifecycle,
-       its labels and — for subscribers — Frigate+ submission live. Behind
-       ingress the token in the path is reissued whenever the add-on restarts,
-       so it is read fresh on every tap rather than stored, and a session is
-       minted exactly as Home Assistant's own add-on panel does. */
-    async _frigateUrl(id) {
+    /* Where Frigate serves its Explore view, resolved before the sighting is
+       drawn rather than when its button is tapped. A plain link is the only
+       thing the iOS Companion app opens reliably — a tab opened in script and
+       navigated after an await never arrives — and a link needs its address up
+       front. Behind ingress that address carries a token the Supervisor
+       reissues whenever the add-on restarts, so it is re-read once it ages,
+       and a session is minted exactly as Home Assistant's own add-on panel
+       does. Returns null while the first lookup is still in flight. */
+    _frigateBase() {
       const f = this._cfg.frigate;
-      let base = f.url;
-      if (!base) {
-        const info = await this._hass.callWS({ type: 'supervisor/ingress/info', slug: f.addon });
-        const entry = /^(\/api\/hassio_ingress\/[^/]+)/.exec(info?.ingress_url || '');
-        if (!entry) throw new Error(`the ${f.addon} add-on is not serving a page`);
-        const s = await this._hass.callWS({ type: 'supervisor/ingress/session', slug: f.addon });
-        if (s?.session) document.cookie = `ingress_session=${s.session};path=/api/hassio_ingress/;SameSite=Strict${location.protocol === 'https:' ? ';Secure' : ''}`;
-        base = this._hass.hassUrl(entry[1]);
+      if (f.url) return f.url;
+      const have = this._fb;
+      if (have && Date.now() - have.at < 600000) return have.base;
+      if (!this._fbWait) {
+        this._fbWait = (async () => {
+          let base = '', err = '';
+          try {
+            const info = await this._hass.callWS({ type: 'supervisor/ingress/info', slug: f.addon });
+            const entry = /^(\/api\/hassio_ingress\/[^/]+)/.exec(info?.ingress_url || '');
+            if (!entry) throw new Error(`the ${f.addon} add-on is not serving a page`);
+            const s = await this._hass.callWS({ type: 'supervisor/ingress/session', slug: f.addon });
+            if (s?.session) document.cookie = `ingress_session=${s.session};path=/api/hassio_ingress/;SameSite=Strict${location.protocol === 'https:' ? ';Secure' : ''}`;
+            base = this._hass.hassUrl(entry[1]);
+          } catch (e) {
+            err = `Frigate could not be reached: ${e?.message || e}.`;
+          }
+          this._fb = { base, err, at: Date.now() };
+          this._fbWait = null;
+          if (this._ui.cur) this._stage();
+        })();
       }
-      return `${base}/explore?event_id=${encodeURIComponent(id)}`;
+      return have ? have.base : null;
     }
 
-    /* The tab is opened on the tap itself, because a tab opened after an await
-       has lost the gesture a pop-up blocker looks for. */
-    async _openFrigate(id) {
-      const tab = window.open('about:blank', '_blank');
-      if (tab) tab.opener = null;
-      try {
-        const url = await this._frigateUrl(id);
-        if (tab) tab.location.replace(url); else window.open(url, '_blank', 'noopener');
-      } catch (err) {
-        tab?.close();
-        this._ui.note = `Frigate could not be opened: ${err?.message || err}.`;
-        this._stage();
-      }
+    _frigateLink(id) {
+      const base = this._frigateOn() ? this._frigateBase() : '';
+      return base ? `${base}/explore?event_id=${encodeURIComponent(id)}` : '';
     }
 
     /* ---------- derived ---------- */
@@ -560,6 +565,7 @@
     _render(keepTune) {
       if (!this._root) return;
       const u = this._ui;
+      if (this._frigateOn()) this._frigateBase();   // warm, so the link is ready before a sighting is opened
       const all = this._loaded ? this._visible() : [];
       this._all = all;
       const seg = (name, cur, opts) => `<span class="seg" role="group">${opts.map(([v, l]) => `<button data-act="${name}" data-v="${v}" aria-pressed="${String(v) === String(cur)}">${l}</button>`).join('')}</span>`;
@@ -676,6 +682,7 @@
       if (i < 0) { wrap.innerHTML = ''; return; }
       const e = list[i];
       const still = e.snap ? this._media(e.id, 'snapshot.jpg') : this._thumb(e);
+      const frig = this._frigateLink(e.id);
       const media = this._ui.clip && e.clip
         ? `<video class="media" controls playsinline muted preload="metadata" poster="${esc(still)}" data-hls="${esc(this._media(e.id, 'index.m3u8'))}" data-mp4="${esc(this._media(e.id, 'clip.mp4'))}"></video>`
         : `<img class="media" alt="${esc(this._name(e))}" data-id="${esc(e.id)}" data-kind="${e.snap ? 'snapshot' : 'thumbnail'}" src="${esc(still)}">`;
@@ -688,9 +695,9 @@
         <span class="pos">${i + 1} / ${list.length}</span>
         <div class="cap"><div class="t"><div class="p">${esc(this._name(e))}</div><div class="s">${esc([this._when(e.start), ...meta].join(' · '))}</div></div>
           ${e.clip ? (this._ui.clip ? `<button class="pill" data-act="still">${svg('image')}Photo</button>` : `<button class="pill" data-act="clip">${svg('play')}Video</button>`) : ''}
-          ${this._frigateOn() ? `<button class="pill ghost" data-act="frigate" title="Open this sighting in Frigate" aria-label="Open this sighting in Frigate">${svg('find')}</button>` : ''}
+          ${frig ? `<a class="pill ghost" target="_blank" rel="noopener" href="${esc(frig)}" title="Open this sighting in Frigate" aria-label="Open this sighting in Frigate">${svg('find')}</a>` : ''}
           <a class="pill ghost" target="_blank" rel="noopener" href="${esc(still)}" title="Open the picture in a new tab" aria-label="Open the picture in a new tab">${svg('open')}</a>
-        </div>${this._ui.note ? `<div class="err">${esc(this._ui.note)}</div>` : ''}</div>`;
+        </div>${this._fb?.err ? `<div class="err">${esc(this._fb.err)}</div>` : ''}</div>`;
       const video = wrap.querySelector('video');
       if (video) this._attachMedia(video);
       this._root.querySelectorAll('.shot').forEach((b) => b.setAttribute('aria-current', String(+b.dataset.i === i)));
@@ -783,9 +790,8 @@
         }
         case 'cellx': u.cell = null; u.cur = null; break;
         case 'more': u.limit += 120; break;
-        case 'open': { const e = this._list[+b.dataset.i]; u.cur = u.cur === e.id ? null : e.id; u.clip = false; u.note = null; stageOnly = true; break; }
-        case 'step': { const i = this._list.findIndex((e) => e.id === u.cur) + +v; if (this._list[i]) { u.cur = this._list[i].id; u.clip = false; u.note = null; } stageOnly = true; break; }
-        case 'frigate': this._openFrigate(u.cur); return;
+        case 'open': { const e = this._list[+b.dataset.i]; u.cur = u.cur === e.id ? null : e.id; u.clip = false; stageOnly = true; break; }
+        case 'step': { const i = this._list.findIndex((e) => e.id === u.cur) + +v; if (this._list[i]) { u.cur = this._list[i].id; u.clip = false; } stageOnly = true; break; }
         case 'close': u.cur = null; stageOnly = true; break;
         case 'clip': u.clip = true; stageOnly = true; break;
         case 'still': u.clip = false; stageOnly = true; break;

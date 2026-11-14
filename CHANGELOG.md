@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.1 — 2026-11-14
+
+- **The Frigate button did nothing in the iOS Companion app.** It opened a blank tab, resolved the address, then navigated that tab — and the app's web view never arrives at a tab that script opened and then sent somewhere after an await. The same shape of problem as the clips. It is now an ordinary link with its address already in place, which is why the snapshot arrow beside it always worked.
+- The address is therefore resolved when a sighting is drawn rather than when the button is tapped, and kept for ten minutes so a token reissued by an add-on restart is picked up without storing it. A Frigate that cannot be reached now offers no link and says so, instead of a link that goes nowhere.
+
 ## 1.3.0 — 2026-11-14
 
 - **The open button offers the picture, not the clip.** It used to hand the browser Frigate's `clip.mp4` whenever a sighting had one, which on an iPhone opens the player that refuses that file: Frigate serves it without byte-range support, and Apple's player answers by fetching the whole thing over and over and discarding each copy. In the card a clip plays because hls.js is doing the work; a new tab has no such help. The button now opens the snapshot, which every browser on every platform can show, and clips stay with the player that can play them.
