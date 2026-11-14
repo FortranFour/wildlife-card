@@ -441,14 +441,22 @@
     }
 
     /* Ingress accepts nothing but a session cookie, and the Companion apps
-       open a new-tab link in the system browser, which keeps its own cookies:
-       the link arrives with no session and the Supervisor answers 401. Inside
-       the apps an add-on's Frigate therefore opens in the same view, where
-       the cookie lives. A plain address has Frigate's own login and can go to
-       a new tab anywhere. */
+       give a new-tab link to the system browser, which keeps its own cookies,
+       so it arrives with no session. Sending the app's own view to the ingress
+       address fares no better: the app answers by reloading the frontend.
+       What does work there is Home Assistant's own add-on panel, so inside
+       the apps the button goes to that, at the cost of landing on Frigate's
+       front page rather than on the sighting. */
     _frigateHere() {
-      if (this._cfg.frigate.url) return false;
+      if (this._cfg.frigate.url || !this._cfg.frigate.addon) return false;
       return /Home Assistant\//.test(navigator.userAgent) || !!window.externalApp || !!window.webkit?.messageHandlers?.externalBus;
+    }
+
+    _frigatePanel() {
+      const slug = this._cfg.frigate.addon;
+      const path = this._hass?.panels?.[slug] ? `/${slug}` : `/hassio/ingress/${slug}`;
+      history.pushState(null, '', path);
+      window.dispatchEvent(new CustomEvent('location-changed', { detail: { replace: false }, bubbles: true, composed: true }));
     }
 
     _frigateLink(id) {
@@ -605,7 +613,7 @@
     _render(keepTune) {
       if (!this._root) return;
       const u = this._ui;
-      if (this._frigateOn()) this._frigateBase();   // warm, so the link is ready before a sighting is opened
+      if (this._frigateOn() && !this._frigateHere()) this._frigateBase();   // warm, so the link is ready before a sighting is opened
       const all = this._loaded ? this._visible() : [];
       this._all = all;
       const seg = (name, cur, opts) => `<span class="seg" role="group">${opts.map(([v, l]) => `<button data-act="${name}" data-v="${v}" aria-pressed="${String(v) === String(cur)}">${l}</button>`).join('')}</span>`;
@@ -722,7 +730,7 @@
       if (i < 0) { wrap.innerHTML = ''; return; }
       const e = list[i];
       const still = e.snap ? this._media(e.id, 'snapshot.jpg') : this._thumb(e);
-      const frig = this._frigateLink(e.id);
+      const frig = this._frigateHere() ? '' : this._frigateLink(e.id);
       const away = this._signed(e);
       const media = this._ui.clip && e.clip
         ? `<video class="media" controls playsinline muted preload="metadata" poster="${esc(still)}" data-hls="${esc(this._media(e.id, 'index.m3u8'))}" data-mp4="${esc(this._media(e.id, 'clip.mp4'))}"></video>`
@@ -736,7 +744,9 @@
         <span class="pos">${i + 1} / ${list.length}</span>
         <div class="cap"><div class="t"><div class="p">${esc(this._name(e))}</div><div class="s">${esc([this._when(e.start), ...meta].join(' · '))}</div></div>
           ${e.clip ? (this._ui.clip ? `<button class="pill" data-act="still">${svg('image')}Photo</button>` : `<button class="pill" data-act="clip">${svg('play')}Video</button>`) : ''}
-          ${frig ? `<a class="pill ghost" ${this._frigateHere() ? '' : 'target="_blank" rel="noopener" '}href="${esc(frig)}" title="Open this sighting in Frigate" aria-label="Open this sighting in Frigate">${svg('find')}</a>` : ''}
+          ${this._frigateHere()
+            ? `<button class="pill ghost" data-act="frigate" title="Open Frigate" aria-label="Open Frigate">${svg('find')}</button>`
+            : frig ? `<a class="pill ghost" target="_blank" rel="noopener" href="${esc(frig)}" title="Open this sighting in Frigate" aria-label="Open this sighting in Frigate">${svg('find')}</a>` : ''}
           ${away ? `<a class="pill ghost" target="_blank" rel="noopener" href="${esc(away)}" title="Open the picture in a new tab" aria-label="Open the picture in a new tab">${svg('open')}</a>` : ''}
         </div>${this._fb?.err ? `<div class="err">${esc(this._fb.err)}</div>` : ''}</div>`;
       const video = wrap.querySelector('video');
@@ -833,6 +843,7 @@
         case 'more': u.limit += 120; break;
         case 'open': { const e = this._list[+b.dataset.i]; u.cur = u.cur === e.id ? null : e.id; u.clip = false; stageOnly = true; break; }
         case 'step': { const i = this._list.findIndex((e) => e.id === u.cur) + +v; if (this._list[i]) { u.cur = this._list[i].id; u.clip = false; } stageOnly = true; break; }
+        case 'frigate': this._frigatePanel(); return;
         case 'close': u.cur = null; stageOnly = true; break;
         case 'clip': u.clip = true; stageOnly = true; break;
         case 'still': u.clip = false; stageOnly = true; break;

@@ -270,20 +270,24 @@ const shot = async (page, name) => {
   check(direct === `http://192.168.1.10:5000/explore?event_id=${id2}`,
     `a plain address loses its trailing slash rather than doubling it (${direct})`);
 
-  // Ingress wants a cookie the system browser does not have, so inside the
-  // Companion app the add-on's link must stay in the same view.
+  // Inside the Companion app neither a new tab nor the same view reaches
+  // ingress, so an add-on's button goes to Home Assistant's own panel for it.
   {
     const APP = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Home Assistant/2026.10 (io.robbie.HomeAssistant; build:2026.1; iOS 18.0)";
-    const inApp = async (cfg) => {
-      const page = await open("&config=" + encodeURIComponent(cfg), 430, APP);
-      await page.click$(".shot");
-      await page.waitForSelector(`wildlife-card ${SEL}`);
-      const tgt = await page.evaluate((s) => window.card.shadowRoot.querySelector(s).getAttribute("target"), SEL);
-      await page.close();
-      return tgt;
-    };
-    check((await inApp('{"frigate_addon":"ccab4aaf_frigate-fa"}')) === null, "in the Companion app an add-on's Frigate opens in the same view");
-    check((await inApp('{"frigate_url":"http://192.168.1.10:5000"}')) === "_blank", "while a plain address still gets its own tab there");
+    let page = await open("&config=" + encodeURIComponent('{"frigate_addon":"ccab4aaf_frigate-fa"}'), 430, APP);
+    await page.click$(".shot");
+    await page.waitForSelector('wildlife-card [data-act="frigate"]');
+    check(!(await page.$(`wildlife-card ${SEL}`)), "in the Companion app an add-on gets no ingress link");
+    await page.evaluate(() => { window.moved = 0; window.addEventListener("location-changed", () => window.moved++); });
+    await page.click$('[data-act="frigate"]');
+    const [path, moved] = await page.evaluate(() => [location.pathname, window.moved]);
+    check(path === "/hassio/ingress/ccab4aaf_frigate-fa" && moved === 1, `its button navigates Home Assistant to the add-on's panel (${path})`);
+    await page.close();
+    page = await open("&config=" + encodeURIComponent('{"frigate_url":"http://192.168.1.10:5000"}'), 430, APP);
+    await page.click$(".shot");
+    await page.waitForSelector(`wildlife-card ${SEL}`);
+    check(true, "while a plain address still gets its link there");
+    await page.close();
   }
 
   // An add-on that is not there should say so rather than offer a dead link.

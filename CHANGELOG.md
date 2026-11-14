@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.4 — 2026-11-14
+
+- **Inside the Companion apps the Frigate button opens Home Assistant's own Frigate panel.** 1.3.3 sent the app's view to the ingress address, and the app answered by reloading the frontend, so the tap landed on the default dashboard and never reached Frigate. The panel is the one route known to work there. It opens Frigate's front page rather than the sighting; browsers keep the link to the sighting itself, as does a plain `frigate_url`.
+
 ## 1.3.3 — 2026-11-14
 
 - **The Frigate button returned 401 in the Companion apps.** Ingress accepts nothing but a session cookie, and the apps hand a new-tab link to the system browser, which keeps its own cookies — so the link arrived with no session, and the Supervisor's log said as much. Inside the apps an add-on's Frigate now opens in the same view, where the cookie is; go back to return to the dashboard. Desktop browsers and a plain `frigate_url` keep the new tab.
