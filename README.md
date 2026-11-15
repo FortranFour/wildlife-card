@@ -18,7 +18,7 @@ A Home Assistant dashboard card for the animals your [Frigate](https://frigate.v
 ## Requirements
 
 - [Frigate](https://frigate.video) and the [Frigate integration](https://github.com/blakeblackshear/frigate-hass-integration) for Home Assistant.
-- Animal labels in your Frigate `objects → track` list. Most of them (`rodent`, `rabbit`, `raccoon`, `squirrel`, `fox`, `skunk`, `possum`) come from a [Frigate+](https://frigate.video/plus) model; `bird`, `cat` and `dog` are in the default model as well.
+- Animal labels in your Frigate `objects → track` list. Works with both [Frigate+](https://frigate.video/plus) labels (`rodent`, `rabbit`, `raccoon`, `squirrel`, `fox`, `skunk`, `possum`), default model labels (`bird`, `cat`, `dog`), and general detectors + sub-label classifiers (e.g. MegaDetector `animal` with SpeciesNet `sub_label`s).
 
 ## Install
 
@@ -81,7 +81,10 @@ Quote `start` and `end`. Unquoted, YAML reads `23:00` as a number and the night 
 | `coyote.start` | `'23:00'` | Start of the night window. |
 | `coyote.end` | `'05:00'` | End of the night window. |
 | `coyote.person_window` | `120` | Seconds either side of a dog to look for a person. |
-| `species` | the eight below | Replaces the built-in species list entirely. |
+| `species` | the eight below | Set custom species groups (list), or `auto` to discover tiles dynamically from detected labels and `sub_label`s. |
+| `ignore_labels` | `[]` | Extra labels or `sub_label`s to ignore when `species: auto`. |
+| `aliases` | `{}` | Map raw labels or `sub_label`s to custom display names (useful for taxonomic rollups). |
+| `glyphs` | `{}` | Override tile emoji by species name or raw label. |
 
 `days`, `min_score` and the grid's row mode are starting values. Once you use those controls the card remembers your choice in that browser, and the YAML no longer decides them.
 
@@ -116,7 +119,26 @@ species:
 
 Sightings in a multi-label group are still named individually in the browser, so a fox inside *Others* is labelled "Fox".
 
-Three ids carry behaviour and are worth keeping: `rodent` drives the indoor alert and the location/time summary, `coyote` receives the inference, and `other` names its sightings by their own label rather than the group name.
+Three ids carry behaviour and are worth keeping: `rodent` drives the indoor alert and the location/time summary, `coyote` receives the inference, and `other` names its sightings by their own label rather than the group name. Explicit `species` lists match both Frigate `label` and `sub_label`.
+
+### Dynamic discovery (`species: auto`)
+
+If you use a general detector (`animal` with SpeciesNet or similar `sub_label`s) instead of fixed class labels, set `species: auto`:
+
+```yaml
+type: custom:wildlife-card
+species: auto
+aliases:
+  sciuridae family: Squirrel Family
+  dasypus species: Armadillo
+  urocyon cinereoargenteus: Gray Fox
+glyphs:
+  armadillo: 🐾
+ignore_labels:
+  - moth
+```
+
+The card discovers wildlife tiles automatically from `frigate/events/summary` (promoting `sub_label`s ahead of generic primary labels like `animal`), strips taxonomy strings (`;`) and parenthetical Latin suffixes, folds `grey`/`gray` and case variants, and keeps inferred coyotes working when `sub_label` is a dog.
 
 ## Coyotes without a coyote label
 
