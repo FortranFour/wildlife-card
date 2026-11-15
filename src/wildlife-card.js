@@ -19,6 +19,8 @@
  *   sun_shading: true             # day/night shading behind the time-of-day rows
  *   refresh: 300                  # seconds between background refreshes
  *   indoor_cameras: [Attic, Crawlspace]
+ *   clip_lead_in: 0               # extra seconds before a sighting when playing a clip
+ *   clip_lead_out: 0              # extra seconds after a sighting when playing a clip
  *   coyote:
  *     enabled: true
  *     cameras: [Driveway, Front]  # where a lone night-time dog counts
@@ -192,6 +194,8 @@
         refresh: Math.max(60, +c.refresh || 300),
         sun: c.sun_shading !== false,
         indoor: (c.indoor_cameras || ['Attic', 'Crawlspace']).map((s) => s.toLowerCase()),
+        clipLeadIn: c.clip_lead_in != null && c.clip_lead_in !== '' && Number.isFinite(+c.clip_lead_in) ? Math.max(0, +c.clip_lead_in) : 0,
+        clipLeadOut: c.clip_lead_out != null && c.clip_lead_out !== '' && Number.isFinite(+c.clip_lead_out) ? Math.max(0, +c.clip_lead_out) : 0,
         frigate: { url: String(c.frigate_url || '').replace(/\/+$/, ''), addon: String(c.frigate_addon || '').trim() },
         species: (Array.isArray(c.species) && c.species.length ? c.species : DEFAULT_SPECIES).map((s) => ({
           id: s.id, name: s.name || pretty(s.id), one: s.one || (s.name || pretty(s.id)).replace(/e?s$/, ''),
@@ -362,6 +366,21 @@
 
     _media(id, file) { return this._hass.hassUrl(`/api/frigate/${this._cfg.instance}/notifications/${id}/${file}`); }
     _thumb(e) { return this._media(e.id, 'thumbnail.jpg'); }
+    _clipPaths(e) {
+      const { clipLeadIn: before, clipLeadOut: after, instance } = this._cfg;
+      if ((before <= 0 && after <= 0) || !e.cam || !e.start) return null;
+      const start = Math.max(0, Math.floor(e.start - before));
+      const end = Math.ceil((e.end || Date.now() / 1000) + after);
+      const cam = encodeURIComponent(e.cam);
+      return {
+        hls: `/api/frigate/${instance}/vod/${cam}/start/${start}/end/${end}/index.m3u8`,
+        mp4: `/api/frigate/${instance}/recording/${cam}/start/${start}/end/${end}`,
+      };
+    }
+    async _signPath(path) {
+      const r = await this._hass.callWS({ type: 'auth/sign_path', path, expires: 3600 });
+      return r?.path ? this._hass.hassUrl(r.path) : '';
+    }
 
     /* If the unauthenticated notification proxy is switched off, retry once
        through an HA signed path. */
@@ -732,8 +751,9 @@
       const still = e.snap ? this._media(e.id, 'snapshot.jpg') : this._thumb(e);
       const frig = this._frigateHere() ? '' : this._frigateLink(e.id);
       const away = this._signed(e);
+      const pad = this._ui.clip && e.clip ? this._clipPaths(e) : null;
       const media = this._ui.clip && e.clip
-        ? `<video class="media" controls playsinline muted preload="metadata" poster="${esc(still)}" data-hls="${esc(this._media(e.id, 'index.m3u8'))}" data-mp4="${esc(this._media(e.id, 'clip.mp4'))}"></video>`
+        ? `<video class="media" controls playsinline muted preload="metadata" poster="${esc(still)}"${pad ? ` data-vod-hls="${esc(pad.hls)}" data-vod-mp4="${esc(pad.mp4)}"` : ''} data-hls="${esc(this._media(e.id, 'index.m3u8'))}" data-mp4="${esc(this._media(e.id, 'clip.mp4'))}"></video>`
         : `<img class="media" alt="${esc(this._name(e))}" data-id="${esc(e.id)}" data-kind="${e.snap ? 'snapshot' : 'thumbnail'}" src="${esc(still)}">`;
       const dur = e.end ? Math.max(1, Math.round(e.end - e.start)) : null;
       const meta = [pretty(e.cam), `${Math.round(e.score * 100)}%${e.inferred ? ' as dog' : ''}`, dur ? (dur >= 90 ? `${Math.round(dur / 60)} min` : `${dur}s`) : 'in progress', ...e.zones.slice(0, 2).map(pretty)];
@@ -755,31 +775,61 @@
       this._root.querySelector('.shot[aria-current="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
     }
 
-    /* Play order: hls.js, then the browser's own HLS, then the file. Home
-       Assistant's media browser uses hls.js and plays recordings that Apple's
-       native player rejects outright — same file, same connection — so the
-       library goes first wherever it works, and each step falls to the next. */
+    /* Play order: padded VOD via hls.js (with signed segment auth), event HLS
+       via hls.js, browser native HLS, padded recording MP4, then event MP4.
+       Home Assistant's Frigate integration serves padded clips via /vod and
+       /recording; falling back to /notifications ensures old or unpadded events
+       still play even when continuous/motion retention has expired. */
+    async _attachHls(v, url, failFlag, sig) {
+      const Hls = await this._hlsLib();
+      if (!Hls || !Hls.isSupported() || !v.isConnected) return false;
+      const hls = new Hls({
+        enableWorker: false,
+        ...(sig ? {
+          xhrSetup(xhr, reqUrl) {
+            if (!reqUrl.includes('authSig=')) {
+              xhr.open('GET', `${reqUrl}${reqUrl.includes('?') ? '&' : '?'}authSig=${encodeURIComponent(sig)}`, true);
+            }
+          },
+        } : {}),
+      });
+      v._hls = hls;
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        if (!data.fatal) return;
+        hls.destroy(); v._hls = null; v.dataset[failFlag] = '1'; this._attachMedia(v);
+      });
+      hls.on(Hls.Events.MANIFEST_PARSED, () => v.play().catch(() => {}));
+      hls.loadSource(url);
+      hls.attachMedia(v);
+      return true;
+    }
+
     async _attachMedia(v) {
       const play = () => v.play().catch(() => {});
+      if (v.dataset.vodHls && !v.dataset.noVodLib) {
+        try {
+          const signed = await this._signPath(v.dataset.vodHls);
+          if (!v.isConnected) return;
+          const sig = signed ? new URL(signed, location.href).searchParams.get('authSig') : '';
+          if (signed && await this._attachHls(v, signed, 'noVodLib', sig)) return;
+        } catch (err) { /* fall through to event HLS */ }
+        v.dataset.noVodLib = '1';
+      }
       if (v.dataset.hls && !v.dataset.noLib) {
-        const Hls = await this._hlsLib();
-        if (Hls && Hls.isSupported() && v.isConnected) {
-          const hls = new Hls({ enableWorker: false });
-          v._hls = hls;
-          hls.on(Hls.Events.ERROR, (_event, data) => {
-            if (!data.fatal) return;
-            hls.destroy(); v._hls = null; v.dataset.noLib = '1'; this._attachMedia(v);
-          });
-          hls.on(Hls.Events.MANIFEST_PARSED, play);
-          hls.loadSource(v.dataset.hls);
-          hls.attachMedia(v);
-          return;
-        }
+        if (await this._attachHls(v, v.dataset.hls, 'noLib')) return;
       }
       if (v.dataset.hls && !v.dataset.noNative && v.canPlayType('application/vnd.apple.mpegurl')) {
         v.dataset.noNative = '1';
         v.src = v.dataset.hls; v.load(); play();
         return;
+      }
+      if (v.dataset.vodMp4 && !v.dataset.noVodMp4) {
+        v.dataset.noVodMp4 = '1';
+        try {
+          const signed = await this._signPath(v.dataset.vodMp4);
+          if (!v.isConnected) return;
+          if (signed) { v.src = signed; v.load(); play(); return; }
+        } catch (err) { /* fall through to event MP4 */ }
       }
       if (v.dataset.mp4) {
         const url = v.dataset.mp4; delete v.dataset.mp4;
@@ -875,6 +925,8 @@
     instance_id: ['Frigate instance', 'Its MQTT client id. Only matters with more than one Frigate.'],
     frigate_addon: ['Frigate add-on', 'Its slug, for a Frigate running as an add-on. Adds a button that opens the sighting in Frigate.'],
     frigate_url: ['Frigate address', 'For a Frigate that is not an add-on, e.g. http://192.168.1.10:5000. Used in preference to the slug.'],
+    clip_lead_in: ['Clip lead-in', 'Extra seconds before a sighting when playing a clip (uses Frigate recordings).'],
+    clip_lead_out: ['Clip lead-out', 'Extra seconds after a sighting when playing a clip (uses Frigate recordings).'],
     coyote: ['Coyotes', ''],
     enabled: ['Infer coyotes from night-time dogs', 'Frigate cannot detect a coyote, so a dog alone at night stands in for one.'],
     cameras: ['Cameras to watch', 'Where a night-time dog counts as a likely coyote.'],
@@ -906,6 +958,10 @@
       { type: 'grid', name: '', schema: [
         { name: 'frigate_addon', selector: { text: {} } },
         { name: 'frigate_url', selector: { text: {} } },
+      ] },
+      { type: 'grid', name: '', schema: [
+        { name: 'clip_lead_in', selector: { number: { min: 0, max: 60, step: 1, mode: 'box', unit_of_measurement: 'seconds' } } },
+        { name: 'clip_lead_out', selector: { number: { min: 0, max: 60, step: 1, mode: 'box', unit_of_measurement: 'seconds' } } },
       ] },
       { type: 'expandable', name: 'coyote', title: FIELDS.coyote[0], icon: 'mdi:paw', schema: [
         { name: 'enabled', selector: { boolean: {} } },
@@ -964,8 +1020,10 @@
         days: +v.days,
         coyote: { ...v.coyote, start: clock(v.coyote?.start), end: clock(v.coyote?.end) },
       };
-      /* An emptied text field should leave no key behind. */
-      for (const k of ['frigate_addon', 'frigate_url']) if (!config[k]) delete config[k];
+      /* An emptied field should leave no key behind. */
+      for (const k of ['frigate_addon', 'frigate_url', 'clip_lead_in', 'clip_lead_out']) {
+        if (config[k] === '' || config[k] == null) delete config[k];
+      }
       this.dispatchEvent(new CustomEvent('config-changed', { detail: { config }, bubbles: true, composed: true }));
     }
 
