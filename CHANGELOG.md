@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.4.0 — unreleased (1.4.0-beta.2)
+## 1.4.0 — 2026-11-15
 
 - **Automatic species discovery.** `species: auto` builds the tiles from whatever animals Frigate reports instead of a fixed list, promoting classified sub-labels (a bird classifier's species, SpeciesNet's taxonomy) to tiles of their own. `aliases` renames them, `glyphs` picks their emoji and `ignore_labels` leaves some out. Contributed by mgranberry.
 - **Sub-labels in species lists.** A group's `labels` now match a sighting's sub-label as well as its label. Contributed by mgranberry.
