@@ -310,6 +310,74 @@ const shot = async (page, name) => {
   }
 }
 
+/* 10 — explicit species matches sub_label (including DEFAULT_SPECIES & custom sub-label lists) */
+{
+  const cfg = encodeURIComponent(JSON.stringify({
+    species: [
+      { id: "squirrel", name: "Squirrels", one: "Squirrel", labels: ["eastern fox squirrel", "squirrel"], glyph: "🐿️" },
+      { id: "coyote", name: "Coyotes", one: "Coyote", labels: ["coyote"], glyph: "🐺" },
+    ],
+  }));
+  const page = await open(`&mode=speciesnet&config=${cfg}`);
+  const sq = await page.$('wildlife-card .tile[data-v="squirrel"] .n');
+  const coy = await page.$('wildlife-card .tile[data-v="coyote"] .n');
+  check(sq && +(await sq.textContent()) > 0, "explicit species list matches events by sub_label via summary preflight");
+  check(coy && +(await coy.textContent()) === 2, "explicit mode infers coyotes from SpeciesNet domestic dog sub_label");
+  await page.close();
+}
+
+/* 11 — species: auto discovers labels/sub_labels, strips taxonomy, applies aliases & glyphs */
+{
+  const cfg = encodeURIComponent(JSON.stringify({
+    species: "auto",
+    aliases: {
+      "sciuridae family": "Squirrel Family",
+      "dasypus species": "Armadillo",
+      "urocyon cinereoargenteus": "Gray Fox",
+    },
+    glyphs: { armadillo: "🛡️" },
+    ignore_labels: ["striped skunk"],
+  }));
+  const page = await open(`&mode=speciesnet&config=${cfg}`);
+  const names = await page.$$eval("wildlife-card .tile b", (els) => els.map((e) => e.textContent.trim()));
+  check(!names.includes("Person") && !names.includes("Car"), "person and car detector classes are excluded");
+  check(!names.includes("Striped Skunk"), "ignore_labels excludes specified sub_labels");
+  check(names.filter((n) => n === "Eastern Fox Squirrel").length === 1,
+    `case variants merge into pretty label (${names.join(", ")})`);
+  const sqGlyph = await page.textContent('wildlife-card .tile[data-v="eastern_fox_squirrel"] .pic span');
+  const foxGlyph = await page.textContent('wildlife-card .tile[data-v="gray_fox"] .pic span');
+  const armGlyph = await page.textContent('wildlife-card .tile[data-v="armadillo"] .pic span');
+  check(sqGlyph === "🐿️" && foxGlyph === "🦊", `Eastern Fox Squirrel gets squirrel glyph (${sqGlyph}) while Gray Fox gets fox (${foxGlyph})`);
+  check(armGlyph === "🛡️", `custom YAML glyph override applied (${armGlyph})`);
+  check(names.filter((n) => n === "Gray Fox").length === 1, "grey/gray fox variants & alias merge into Gray Fox");
+  check(names.includes("Squirrel Family"), "YAML alias maps taxonomic family rollup (Squirrel Family)");
+  check(names.includes("Armadillo"), "YAML alias maps taxonomic genus rollup (Armadillo)");
+  check(names.includes("Eastern Gray Squirrel"), "semicolon-delimited taxonomy string extracts common name");
+  check(names.includes("Nine-Banded Armadillo"), "trailing Latin parenthetical is stripped cleanly");
+  check(names.includes("Coyote"), "Coyote inferred from SpeciesNet domestic dog at night");
+  check(names[names.length - 1] === "Animal", "generic Animal bucket sorts to the end");
+  const coy = await page.$('wildlife-card .tile[data-v="coyote"] .n');
+  check(coy && +(await coy.textContent()) === 2, "person-adjacent night dog does not count as coyote");
+  await page.click$('.tile[data-v="gray_fox"]');
+  await page.click$(".shot");
+  const cap = await page.text$(".stage .p");
+  check(!/Gray Fox\s*·\s*Gray Fox/i.test(cap), `stage caption does not duplicate species name (${cap})`);
+  await shot(page, "speciesnet-auto.png");
+  check(page.errors.length === 0, `species: auto renders without errors (${page.errors.slice(0, 2).join("; ")})`);
+  await page.close();
+}
+
+/* 12 — summary RPC failure falls back gracefully to unfiltered events */
+{
+  const cfg = encodeURIComponent(JSON.stringify({ species: "auto" }));
+  const page = await open(`&mode=speciesnet&nosummary=1&config=${cfg}`);
+  const names = await page.$$eval("wildlife-card .tile b", (els) => els.map((e) => e.textContent.trim()));
+  check(names.includes("Eastern Fox Squirrel") && names.includes("Gray Fox"),
+    `fallback without summary discovers SpeciesNet sublabels (${names.slice(0, 4).join(", ")})`);
+  check(page.errors.length === 0, `summary fallback runs without console errors (${page.errors.slice(0, 2).join("; ")})`);
+  await page.close();
+}
+
 await browser.close();
 server.close();
 console.log(failures.length ? `\n${failures.length} check(s) failed` : `\nall checks passed — screenshots in dev/out/`);
