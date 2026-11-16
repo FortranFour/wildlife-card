@@ -180,7 +180,8 @@ const shot = async (page, name) => {
     `the form opens on the real settings (${r.shown.title}, ${r.shown.days}d)`);
   check(r.cams.includes("Driveway"), `camera names come from Frigate (${r.cams.slice(0, 3).join(", ")}…)`);
   check(r.changed.species?.length === 1 && r.changed.card_reference_id === "wildlife"
-    && r.changed.type === "custom:wildlife-card", "species and other keys survive an edit");
+    && r.changed.type === "custom:wildlife-card"
+    && !("clip_lead_in" in r.changed) && !("clip_lead_out" in r.changed), "species and other keys survive an edit");
   check(r.changed.days === 7 && r.changed.title === "Critters", "edits are written back in the card's own types");
   check(r.changed.coyote.start === "22:30", `times are trimmed to hours and minutes (${r.changed.coyote.start})`);
   check(page.errors.length === 0, `the editor runs without errors (${page.errors.slice(0, 2).join("; ")})`);
@@ -308,6 +309,170 @@ const shot = async (page, name) => {
     check(!(await page.$(`wildlife-card ${SEL}`)), "and gets no Frigate button");
     await page.close();
   }
+}
+
+/* 10 — explicit species matches sub_label (including DEFAULT_SPECIES & custom sub-label lists) */
+{
+  const cfg = encodeURIComponent(JSON.stringify({
+    species: [
+      { id: "squirrel", name: "Squirrels", one: "Squirrel", labels: ["eastern fox squirrel", "squirrel"], glyph: "🐿️" },
+      { id: "coyote", name: "Coyotes", one: "Coyote", labels: ["coyote"], glyph: "🐺" },
+    ],
+  }));
+  const page = await open(`&mode=speciesnet&config=${cfg}`);
+  const sq = await page.$('wildlife-card .tile[data-v="squirrel"] .n');
+  const coy = await page.$('wildlife-card .tile[data-v="coyote"] .n');
+  check(sq && +(await sq.textContent()) > 0, "explicit species list matches events by sub_label via summary preflight");
+  check(coy && +(await coy.textContent()) === 2, "explicit mode infers coyotes from SpeciesNet domestic dog sub_label");
+  await page.close();
+}
+
+/* 11 — species: auto discovers labels/sub_labels, strips taxonomy, applies aliases & glyphs */
+{
+  const cfg = encodeURIComponent(JSON.stringify({
+    species: "auto",
+    aliases: {
+      "sciuridae family": "Squirrel Family",
+      "dasypus species": "Armadillo",
+      "urocyon cinereoargenteus": "Gray Fox",
+    },
+    glyphs: { armadillo: "🛡️" },
+    ignore_labels: ["striped skunk"],
+  }));
+  const page = await open(`&mode=speciesnet&config=${cfg}`);
+  const names = await page.$$eval("wildlife-card .tile b", (els) => els.map((e) => e.textContent.trim()));
+  check(!names.includes("Person") && !names.includes("Car"), "person and car detector classes are excluded");
+  check(!names.includes("Striped Skunk"), "ignore_labels excludes specified sub_labels");
+  check(names.filter((n) => n === "Eastern Fox Squirrel").length === 1,
+    `case variants merge into pretty label (${names.join(", ")})`);
+  const sqGlyph = await page.textContent('wildlife-card .tile[data-v="eastern_fox_squirrel"] .pic span');
+  const foxGlyph = await page.textContent('wildlife-card .tile[data-v="gray_fox"] .pic span');
+  const armGlyph = await page.textContent('wildlife-card .tile[data-v="armadillo"] .pic span');
+  check(sqGlyph === "🐿️" && foxGlyph === "🦊", `Eastern Fox Squirrel gets squirrel glyph (${sqGlyph}) while Gray Fox gets fox (${foxGlyph})`);
+  check(armGlyph === "🛡️", `custom YAML glyph override applied (${armGlyph})`);
+  check(names.filter((n) => n === "Gray Fox").length === 1, "grey/gray fox variants & alias merge into Gray Fox");
+  check(names.includes("Squirrel Family"), "YAML alias maps taxonomic family rollup (Squirrel Family)");
+  check(names.includes("Armadillo"), "YAML alias maps taxonomic genus rollup (Armadillo)");
+  check(names.includes("Eastern Gray Squirrel"), "semicolon-delimited taxonomy string extracts common name");
+  check(names.includes("Nine-Banded Armadillo"), "trailing Latin parenthetical is stripped cleanly");
+  check(names.includes("Coyote"), "Coyote inferred from SpeciesNet domestic dog at night");
+  check(names[names.length - 1] === "Animal", "generic Animal bucket sorts to the end");
+  const coy = await page.$('wildlife-card .tile[data-v="coyote"] .n');
+  check(coy && +(await coy.textContent()) === 2, "person-adjacent night dog does not count as coyote");
+  await page.click$('.tile[data-v="gray_fox"]');
+  await page.click$(".shot");
+  const cap = await page.text$(".stage .p");
+  check(!/Gray Fox\s*·\s*Gray Fox/i.test(cap), `stage caption does not duplicate species name (${cap})`);
+  await shot(page, "speciesnet-auto.png");
+  check(page.errors.length === 0, `species: auto renders without errors (${page.errors.slice(0, 2).join("; ")})`);
+  await page.close();
+}
+
+/* 12 — summary RPC failure falls back gracefully to unfiltered events */
+{
+  const cfg = encodeURIComponent(JSON.stringify({ species: "auto" }));
+  const page = await open(`&mode=speciesnet&nosummary=1&config=${cfg}`);
+  const names = await page.$$eval("wildlife-card .tile b", (els) => els.map((e) => e.textContent.trim()));
+  check(names.includes("Eastern Fox Squirrel") && names.includes("Gray Fox"),
+    `fallback without summary discovers SpeciesNet sublabels (${names.slice(0, 4).join(", ")})`);
+  check(page.errors.length === 0, `summary fallback runs without console errors (${page.errors.slice(0, 2).join("; ")})`);
+  await page.close();
+}
+
+/* 10 — clip lead-in and lead-out VOD/recording paths and default off */
+{
+  const defPage = await open();
+  await defPage.click$(".shot");
+  const defOut = await defPage.evaluate(() => {
+    const e = window.card._list.find((x) => x.id === window.card._ui.cur);
+    return window.card._clipPaths(e);
+  });
+  check(defOut === null, "default 0s lead-in and lead-out preserve unpadded event clips");
+  await defPage.close();
+
+  const customCfg = encodeURIComponent(JSON.stringify({ clip_lead_in: 8, clip_lead_out: 3 }));
+  const page = await open(`&config=${customCfg}`);
+  page.ignore(/ERR_UNKNOWN_URL_SCHEME|about:blank|Failed to load/);
+  await page.evaluate(() => {
+    window._signedPaths = [];
+    const orig = window.hass.callWS.bind(window.hass);
+    window.hass.callWS = async (msg) => {
+      if (msg.type === "auth/sign_path") window._signedPaths.push(msg.path);
+      return orig(msg);
+    };
+  });
+  await page.click$(".shot");
+  await page.click$('[data-act="clip"]');
+  await page.waitForSelector("wildlife-card .fail", { timeout: 15000 }).catch(() => {});
+  const out = await page.evaluate(() => {
+    const e = window.card._list.find((x) => x.id === window.card._ui.cur);
+    return {
+      e: { cam: e.cam, start: e.start, end: e.end },
+      paths: window.card._clipPaths(e),
+      signed: window._signedPaths,
+    };
+  });
+  const expStart = Math.floor(out.e.start - 8);
+  const expEnd = Math.ceil(out.e.end + 3);
+  check(out.paths?.hls === `/api/frigate/frigate/vod/${encodeURIComponent(out.e.cam)}/start/${expStart}/end/${expEnd}/index.m3u8`,
+    `custom lead-in/out builds padded VOD playlist (${out.paths?.hls})`);
+  check(out.paths?.mp4 === `/api/frigate/frigate/recording/${encodeURIComponent(out.e.cam)}/start/${expStart}/end/${expEnd}`,
+    `custom lead-in/out builds padded recording MP4 (${out.paths?.mp4})`);
+  check(out.signed.includes(out.paths.hls) && out.signed.includes(out.paths.mp4),
+    "both padded VOD playlist and recording MP4 are signed via auth/sign_path");
+  await page.close();
+}
+
+/* 13 — discovery goes by what Frigate saw, not what it heard */
+{
+  const tiles = async (cfg) => {
+    const page = await open("&audio=1&config=" + encodeURIComponent(JSON.stringify(cfg)));
+    await page.waitForSelector("wildlife-card .tile");
+    const names = await page.$$eval("wildlife-card .tile b", (els) => els.map((e) => e.textContent.trim().toLowerCase()));
+    await page.close();
+    return names;
+  };
+  const auto = await tiles({ species: "auto" });
+  check(auto.length > 2 && !auto.some((n) => /speech|fire alarm/.test(n)), `sounds are left out of automatic discovery (${auto.slice(0, 5).join(", ")}…)`);
+  const dropped = await tiles({ species: "auto", ignore_labels: ["bird"] });
+  check(!dropped.includes("bird") && auto.includes("bird"), "and ignore_labels removes one that was there");
+  const asked = await tiles({ species: [{ id: "voices", name: "Voices", labels: ["speech"] }] });
+  check(asked.join() === "voices", "while a label written into a species list is taken at its word");
+}
+
+/* 14 — the editor's switch for discovery */
+{
+  const page = await open("&audio=1");
+  const out = await page.evaluate(async () => {
+    const make = async (config) => {
+      const ed = customElements.get("wildlife-card").getConfigElement();
+      document.body.appendChild(ed);
+      ed.setConfig(config); ed.hass = window.hass;
+      await new Promise((r) => setTimeout(r, 300));
+      return ed;
+    };
+    const names = (ed) => JSON.stringify(ed.querySelector("ha-form").schema).match(/"name":"(auto|ignore_labels)"/g) || [];
+    const fire = (ed, value) => new Promise((res) => {
+      ed.addEventListener("config-changed", (ev) => res(ev.detail.config), { once: true });
+      ed.querySelector("ha-form").dispatchEvent(new CustomEvent("value-changed", { detail: { value } }));
+    });
+    const plain = await make({ type: "custom:wildlife-card", title: "Yard" });
+    const base = plain.querySelector("ha-form").data;
+    const on = await fire(plain, { ...base, auto: true });
+    const autoEd = await make({ type: "custom:wildlife-card", species: "auto", ignore_labels: ["dog"], aliases: { a: "B" } });
+    const autoData = autoEd.querySelector("ha-form").data;
+    const off = await fire(autoEd, { ...autoData, auto: false, ignore_labels: [] });
+    const opts = JSON.stringify(autoEd.querySelector("ha-form").schema);
+    const custom = await make({ type: "custom:wildlife-card", species: [{ id: "x", name: "X", labels: ["bird"] }] });
+    const kept = await fire(custom, { ...custom.querySelector("ha-form").data, title: "New" });
+    return { plain: names(plain), on, autoNames: names(autoEd), off, hasSpeech: /speech/i.test(opts), hasBird: /"bird"/.test(opts), customNames: names(custom), kept };
+  });
+  check(out.plain.length === 1, "the editor offers the discovery switch on an ordinary card");
+  check(out.on.species === "auto" && !("auto" in out.on), "turning it on writes species: auto and nothing else");
+  check(out.autoNames.length === 2 && out.hasBird && !out.hasSpeech, "with it on, labels to leave out are offered from what Frigate saw, sounds excluded");
+  check(!("species" in out.off) && !("ignore_labels" in out.off) && out.off.aliases?.a === "B", "turning it off removes the key and leaves the YAML-only options alone");
+  check(out.customNames.length === 0 && Array.isArray(out.kept.species) && out.kept.title === "New", "a species list written in YAML is neither offered the switch nor disturbed");
+  await page.close();
 }
 
 await browser.close();

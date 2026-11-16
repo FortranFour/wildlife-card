@@ -10,7 +10,8 @@ A Home Assistant dashboard card for the animals your [Frigate](https://frigate.v
 - **One tile per species**, each showing the best-scoring recent picture, a count for the period and how long ago the last sighting was. Tap one and the sightings browser shows that species alone — and so does the grid, once you switch it to Time or Location.
 - **An activity grid** of days across by species, two-hour block, or camera — so a spate, a nightly pattern or one bad corner of the property stands out. Tap any cell to see just those sightings. The time-of-day view is shaded for daylight, darkness, dawn and dusk, each column by its own date.
 - **A sightings browser**: a filmstrip newest-first, a full snapshot with previous/next, and the clip for any sighting that has one.
-- **A visual editor**, so everything but the species groups can be set from a form.
+- **A visual editor**, so everything but custom species groups can be set from a form.
+- **Species your way.** Eight built-in groups, your own list, or automatic discovery of whatever animals Frigate reports, classified sub-labels included.
 - **A confidence filter**, tucked behind the tune icon, to screen out the misclassifications every model produces.
 - **Coyotes without a coyote label.** Frigate+ does not detect coyotes yet, so the card can infer them: a dog on chosen cameras late at night with no person nearby, and two overlapping tracks flagged as a pack.
 - **No helper entities.** The card reads tracked objects straight from the Frigate integration over its websocket API. There is nothing to add to `configuration.yaml`.
@@ -18,7 +19,7 @@ A Home Assistant dashboard card for the animals your [Frigate](https://frigate.v
 ## Requirements
 
 - [Frigate](https://frigate.video) and the [Frigate integration](https://github.com/blakeblackshear/frigate-hass-integration) for Home Assistant.
-- Animal labels in your Frigate `objects → track` list. Most of them (`rodent`, `rabbit`, `raccoon`, `squirrel`, `fox`, `skunk`, `possum`) come from a [Frigate+](https://frigate.video/plus) model; `bird`, `cat` and `dog` are in the default model as well.
+- Animal labels in your Frigate `objects → track` list. Works with both [Frigate+](https://frigate.video/plus) labels (`rodent`, `rabbit`, `raccoon`, `squirrel`, `fox`, `skunk`, `possum`), default model labels (`bird`, `cat`, `dog`), and general detectors + sub-label classifiers (e.g. MegaDetector `animal` with SpeciesNet `sub_label`s).
 
 ## Install
 
@@ -28,7 +29,7 @@ A Home Assistant dashboard card for the animals your [Frigate](https://frigate.v
 
 ## Add the card
 
-Pick *Wildlife Card* from the dashboard's card picker and set it up in the visual editor: title, icon, opening range and confidence, refresh interval, day/night shading, indoor cameras and the coyote settings are all there, and the camera pickers offer the names Frigate itself uses. Species groups stay in YAML, and the editor leaves them — and anything else it does not manage — untouched.
+Pick *Wildlife Card* from the dashboard's card picker and set it up in the visual editor: title, icon, opening range and confidence, refresh interval, day/night shading, indoor cameras, clip padding, the Frigate button and the coyote settings are all there, and the camera pickers offer the names Frigate itself uses. A switch turns on automatic species discovery, with a picker for labels to leave out. Custom species groups, aliases and glyphs stay in YAML, and the editor leaves them — and anything else it does not manage — untouched.
 
 In YAML, everything is optional:
 
@@ -76,12 +77,17 @@ Quote `start` and `end`. Unquoted, YAML reads `23:00` as a number and the night 
 | `indoor_cameras` | `[Attic, Crawlspace]` | Cameras where a rodent is an alert rather than a sighting. |
 | `frigate_addon` | — | Add-on slug, e.g. `ccab4aaf_frigate-fa`. Adds a button that opens the sighting in Frigate's Explore view, resolving the ingress address when tapped. Ingress is for administrators, so other users, and visitors to a dashboard published read-only, get no button. |
 | `frigate_url` | — | Same button for a Frigate that is not an add-on, e.g. `http://192.168.1.10:5000`. Used in preference to the slug. |
+| `clip_lead_in` | `0` | Extra seconds of recording before the sighting when playing a clip (`0` uses the event clip directly). |
+| `clip_lead_out` | `0` | Extra seconds of recording after the sighting when playing a clip (`0` uses the event clip directly). |
 | `coyote.enabled` | `true` | Infer coyotes from night-time dogs. See below. |
 | `coyote.cameras` | `[Driveway, Front]` | Cameras the inference looks at. |
 | `coyote.start` | `'23:00'` | Start of the night window. |
 | `coyote.end` | `'05:00'` | End of the night window. |
 | `coyote.person_window` | `120` | Seconds either side of a dog to look for a person. |
-| `species` | the eight below | Replaces the built-in species list entirely. |
+| `species` | the eight below | Set custom species groups (list), or `auto` to discover tiles dynamically from detected labels and `sub_label`s. |
+| `ignore_labels` | `[]` | Extra labels or `sub_label`s to ignore when `species: auto`. |
+| `aliases` | `{}` | Map raw labels or `sub_label`s to custom display names (useful for taxonomic rollups). |
+| `glyphs` | `{}` | Override tile emoji by species name or raw label. |
 
 `days`, `min_score` and the grid's row mode are starting values. Once you use those controls the card remembers your choice in that browser, and the YAML no longer decides them.
 
@@ -116,7 +122,37 @@ species:
 
 Sightings in a multi-label group are still named individually in the browser, so a fox inside *Others* is labelled "Fox".
 
-Three ids carry behaviour and are worth keeping: `rodent` drives the indoor alert and the location/time summary, `coyote` receives the inference, and `other` names its sightings by their own label rather than the group name.
+Three ids carry behaviour and are worth keeping: `rodent` drives the indoor alert and the location/time summary, `coyote` receives the inference, and `other` names its sightings by their own label rather than the group name. Explicit `species` lists match both Frigate `label` and `sub_label`.
+
+### Dynamic discovery (`species: auto`)
+
+If you use a general detector (`animal` with SpeciesNet or similar `sub_label`s) instead of fixed class labels, set `species: auto`:
+
+```yaml
+type: custom:wildlife-card
+species: auto
+aliases:
+  sciuridae family: Squirrel Family
+  dasypus species: Armadillo
+  urocyon cinereoargenteus: Gray Fox
+glyphs:
+  armadillo: 🐾
+ignore_labels:
+  - moth
+```
+
+The same switch is in the visual editor (*Discover species automatically*), along with a picker for `ignore_labels` that offers the labels Frigate has recently reported; `aliases` and `glyphs` are YAML only.
+
+Discovery leaves out what is not wildlife without being told:
+
+- **People and vehicles**: `person`, `face`, `car`, `bicycle`, `motorcycle`, `bus`, `train`, `truck`, `boat`.
+- **Sounds**: anything Frigate records as an audio detection, such as `speech` or `fire_alarm`, whatever its label.
+
+Everything else Frigate tracks becomes a tile, which includes `dog` and `package` if you track them; list those under `ignore_labels` if you would rather not see them. A label you write into an explicit `species` list is always shown, sounds included.
+
+Tiles are ordered by count, and names come from Frigate's labels as they are, so they read in the singular.
+
+The card discovers wildlife tiles automatically from `frigate/events/summary` (promoting `sub_label`s ahead of generic primary labels like `animal`), strips taxonomy strings (`;`) and parenthetical Latin suffixes, folds `grey`/`gray` and case variants, and keeps inferred coyotes working when `sub_label` is a dog.
 
 ## Coyotes without a coyote label
 
@@ -161,9 +197,11 @@ On a 7-day range the baseline is only 4 days, so the flags are jumpier there tha
 
 - **History is bounded by Frigate's retention.** The card can only show what Frigate still holds, so the 30-day range is empty beyond your `record` and `snapshots` retention. Sightings older than your snapshot retention fall back to the thumbnail.
 - **Clips play over HLS**, through [hls.js](https://github.com/video-dev/hls.js), using the event stream the Frigate integration serves from the same proxy. Apple's native player rejects recordings that hls.js plays without complaint, which is why Home Assistant's own media browser succeeds where a plain video element fails. The card tries hls.js, then the browser's own HLS, then the MP4, and says which way it failed if none of them work. hls.js is bundled as a separate file and fetched only when you first play a clip.
+- **Padded clips need recordings.** With `clip_lead_in` or `clip_lead_out` set, the clip is cut from Frigate's recordings for that camera rather than taken from the event, so the extra seconds exist only while your `record` retention still holds them. When they are gone the card falls back to the event's own clip.
 - **Images come from the integration's notification proxy.** If you have that switched off, the card retries through an authenticated signed path.
 - **Corrections on the Frigate+ site do not reach events already stored.** Submitting and relabelling a snapshot trains a future model; it does not change the label on the sighting in the card. The confidence filter is the way to hide a misclassification.
-- **Sub-labels are shown** when Frigate has one, so a classified bird reads "Bird · Dark Eyed Junco".
+- **Sub-labels are shown** when Frigate has one, so a classified bird reads "Bird · Dark Eyed Junco". With `species: auto` each gets a tile of its own, and a species list can name a sub-label among its `labels` to group by it.
+- **The Frigate button inside the Companion apps** opens Home Assistant's Frigate panel rather than the individual sighting, because ingress cannot be reached from there any other way. Browsers get the sighting itself. The button is shown to administrators only when it relies on an add-on.
 
 ## Development
 
@@ -173,8 +211,8 @@ npm run build        # esbuild → dist/ (the card, plus hls.js as a lazy chunk)
 node dev/test.mjs    # headless Chromium checks, screenshots in dev/out/
 ```
 
-`dev/harness.html` renders the built card against generated events, with no Home Assistant and no real footage, so the card can be run and tested without a camera. Open it directly by serving the repo root. The checks cover the species tiles, the filters, each grid mode, the sightings browser and the coyote inference; CI keeps the screenshots as an artifact.
+`dev/harness.html` renders the built card against generated events, with no Home Assistant and no real footage, so the card can be run and tested without a camera. Open it directly by serving the repo root. The checks cover the species tiles, the filters, each grid mode, the sightings browser, the coyote inference, automatic discovery, clip padding and the visual editor; CI keeps the screenshots as an artifact.
 
 ## Credits
 
-Built for [Frigate](https://frigate.video) by Blake Blackshear and the [Frigate integration](https://github.com/blakeblackshear/frigate-hass-integration). MIT licensed.
+Built for [Frigate](https://frigate.video) by Blake Blackshear and the [Frigate integration](https://github.com/blakeblackshear/frigate-hass-integration). Sub-label support, automatic species discovery and clip padding were contributed by [mgranberry](https://github.com/mgranberry). MIT licensed.

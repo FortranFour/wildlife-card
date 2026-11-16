@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.4.0 — unreleased (1.4.0-beta.2)
+
+- **Automatic species discovery.** `species: auto` builds the tiles from whatever animals Frigate reports instead of a fixed list, promoting classified sub-labels (a bird classifier's species, SpeciesNet's taxonomy) to tiles of their own. `aliases` renames them, `glyphs` picks their emoji and `ignore_labels` leaves some out. Contributed by mgranberry.
+- **Sub-labels in species lists.** A group's `labels` now match a sighting's sub-label as well as its label. Contributed by mgranberry.
+- **Clip lead-in and lead-out.** `clip_lead_in` and `clip_lead_out` play extra seconds before and after a sighting, cut from Frigate's recordings, falling back to the event's own clip when the recording is gone. Contributed by mgranberry.
+- **Discovery leaves sounds out.** Frigate files audio detections beside tracked objects, so `speech` and `fire_alarm` arrived as tiles. They are now skipped by the event's type rather than by name. A label written into an explicit species list is still shown.
+- **The visual editor has a switch for discovery** and, with it on, a picker for labels to leave out, offered from what Frigate has recently reported. The clip padding fields are there too.
+
 ## 1.3.5 — 2026-11-15
 
 - **No error under every sighting for viewers who are not administrators.** The Frigate button's address comes from the Supervisor, which answers administrators only. For anyone else (another user of the house, or a visitor to a dashboard published read-only) the card reported "Frigate could not be reached" in a box under the picture. Such a viewer has no Frigate page to open, so the button is now simply left out. A Frigate that is really unreachable still says so.

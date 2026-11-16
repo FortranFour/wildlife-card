@@ -79,6 +79,10 @@ for (let d = 0; d < 30; d++) {
     add('cat', pick(['Side_porch', 'Front_door', 'Bedroom_windows']), at(d, (20 + rnd() * 9) % 24), 25, 0.7 + rnd() * 0.28);
   if (d % 9 === 3) add('fox', 'Back_door', at(d, 4), 15, 0.78);
 }
+if (q.get('audio')) {                         // what Frigate hears is filed beside what it sees
+  for (let i = 0; i < 40; i++) { add('speech', 'Front', at(i % 20, 9 + (i % 8)), 5, 0.9); events.at(-1).data.type = 'audio'; }
+  add('fire_alarm', 'Backyard', at(2, 3), 4, 0.8); events.at(-1).data.type = 'audio';
+}
 if (!q.get('quiet')) {                       // two dogs at 2am, no person: a likely pack
   add('dog', 'Driveway', at(1, 2.2), 40, 0.88);
   add('dog', 'Driveway', at(1, 2.2) - 6, 35, 0.81);
@@ -86,6 +90,29 @@ if (!q.get('quiet')) {                       // two dogs at 2am, no person: a li
 add('dog', 'Front', at(6, 3.5), 20, 0.79);   // single dog at night: a likely coyote
 add('dog', 'Driveway', at(3, 23.6), 30, 0.9); // dog with a person: not a coyote
 add('person', 'Driveway', at(3, 23.6) + 10, 60, 0.95);
+if (q.get('mode') === 'speciesnet') {
+  events.length = 0;
+  for (let d = 0; d < 20; d++) {
+    for (let i = 0; i < 4; i++) add('person', 'Driveway', at(d, 8 + rnd() * 12), 18, 0.92);
+    for (let i = 0; i < 3; i++) add('car', 'Driveway', at(d, 9 + rnd() * 10), 12, 0.90);
+    add('animal', 'Backyard', at(d, 9 + rnd() * 6), 25, 0.85, [], d % 2 ? 'eastern fox squirrel' : 'Eastern fox squirrel');
+    if (d % 2 === 0) add('animal', 'Driveway', at(d, 2 + rnd() * 3), 22, 0.82, [], d % 4 ? 'gray fox' : 'grey fox');
+    if (d % 3 === 0) add('animal', 'Garage_porch', at(d, 1 + rnd() * 3), 30, 0.79, [], 'virginia opossum');
+    if (d % 3 === 1) add('animal', 'Side_yard', at(d, 2 + rnd() * 2), 28, 0.77, [], 'northern raccoon');
+    if (d % 5 === 0) add('animal', 'Front', at(d, 23 - rnd() * 2), 18, 0.74, [], 'striped skunk');
+    if (d % 4 === 0) add('animal', 'Backyard', at(d, 10 + rnd() * 4), 16, 0.72, [], 'sciuridae family');
+    if (d % 6 === 0) add('animal', 'Side_yard', at(d, 4 + rnd() * 2), 20, 0.71, [], 'dasypus species');
+    if (d % 7 === 0) add('animal', 'Front_door', at(d, 21), 20, 0.76, [], 'urocyon cinereoargenteus');
+    if (d % 8 === 0) add('animal', 'Backyard', at(d, 14), 19, 0.80, [], 'mammalia;rodentia;sciuridae;sciurus;carolinensis;eastern_gray_squirrel');
+    if (d % 9 === 0) add('animal', 'Side_yard', at(d, 5), 18, 0.75, [], 'Nine-banded Armadillo (Dasypus novemcinctus)');
+    if (d % 5 === 2) add('animal', 'Side_porch', at(d, 19), 24, 0.81, [], 'domestic cat');
+    if (d % 4 === 1) add('animal', 'Backyard', at(d, 13), 14, 0.78, [], null);
+  }
+  add('animal', 'Driveway', at(1, 2.2), 35, 0.86, [], 'domestic dog');
+  add('animal', 'Driveway', at(1, 2.2) - 5, 30, 0.82, [], 'domestic dog');
+  add('animal', 'Front', at(3, 23.6), 28, 0.91, [], 'domestic dog');
+  add('person', 'Front', at(3, 23.6) + 8, 50, 0.95);
+}
 events.sort((a, b) => b.start_time - a.start_time);
 
 /* ---- placeholder stills (no real footage in this repo) ------------------- */
@@ -100,8 +127,21 @@ const SHAPE = {
   fox: '<ellipse cx="86" cy="54" rx="20" ry="10"/><circle cx="106" cy="46" r="7"/><path d="M101 40l-2-8 7 4M111 40l3-8 -8 4"/><path d="M66 54q-14-2-16-14" stroke="currentColor" stroke-width="7" fill="none" stroke-linecap="round"/>',
 };
 const NIGHT = new Set(['rodent', 'raccoon', 'dog', 'fox']);
+const shapeKey = (e) => {
+  if (SHAPE[e.label]) return e.label;
+  const s = (e.sub_label || '').toLowerCase();
+  if (s.includes('squirrel') || s.includes('sciuridae')) return 'squirrel';
+  if (s.includes('fox')) return 'fox';
+  if (s.includes('raccoon')) return 'raccoon';
+  if (s.includes('cat')) return 'cat';
+  if (s.includes('dog')) return 'dog';
+  if (s.includes('rabbit')) return 'rabbit';
+  if (s.includes('bird')) return 'bird';
+  return 'rodent';
+};
 const still = (e) => {
-  const night = NIGHT.has(e.label) || /(2[0-3]|0[0-5]):/.test(new Date(e.start_time * 1000).toTimeString());
+  const k = shapeKey(e);
+  const night = NIGHT.has(k) || /(2[0-3]|0[0-5]):/.test(new Date(e.start_time * 1000).toTimeString());
   const g = night ? ['#2b2f33', '#14171a'] : ['#7d9b63', '#4e6b44'];
   const ink = night ? '#0b0d0f' : '#2b3326';
   return 'data:image/svg+xml,' + encodeURIComponent(
@@ -110,7 +150,7 @@ const still = (e) => {
          <stop offset="0" stop-color="${g[0]}"/><stop offset="1" stop-color="${g[1]}"/></linearGradient></defs>
        <rect width="160" height="90" fill="url(#g)"/>
        <path d="M0 70h160" stroke="${night ? '#3a4046' : '#6d8a57'}" stroke-width="10" opacity=".5"/>
-       <g fill="${ink}" color="${ink}" opacity=".88">${SHAPE[e.label] || SHAPE.rodent}</g>
+       <g fill="${ink}" color="${ink}" opacity=".88">${SHAPE[k] || SHAPE.rodent}</g>
      </svg>`);
 };
 
@@ -135,6 +175,19 @@ const hass = {
     if (msg.type === 'supervisor/ingress/session') return { session: 'a-session' };
     // Home Assistant signs a path so it can be opened outside the frontend.
     if (msg.type === 'auth/sign_path') return { path: `${msg.path}?authSig=SIGNED` };
+    if (msg.type === 'frigate/events/summary') {
+      if (q.get('nosummary')) throw new Error('summary disabled');
+      calls++;
+      const buckets = new Map();
+      for (const e of events) {
+        const day = new Date(e.start_time * 1000).toISOString().slice(0, 10);
+        const key = `${e.camera}\0${e.label}\0${e.sub_label ?? ''}\0${day}`;
+        const row = buckets.get(key) || { camera: e.camera, label: e.label, sub_label: e.sub_label, day, zones: e.zones, count: 0 };
+        row.count++;
+        buckets.set(key, row);
+      }
+      return JSON.stringify([...buckets.values()]);
+    }
     if (msg.type !== 'frigate/events/get') throw new Error(`unexpected ws call: ${msg.type}`);
     calls++;
     return JSON.stringify(events.filter((e) =>

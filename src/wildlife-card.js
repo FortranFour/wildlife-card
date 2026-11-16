@@ -19,13 +19,15 @@
  *   sun_shading: true             # day/night shading behind the time-of-day rows
  *   refresh: 300                  # seconds between background refreshes
  *   indoor_cameras: [Attic, Crawlspace]
+ *   clip_lead_in: 0               # extra seconds before a sighting when playing a clip
+ *   clip_lead_out: 0              # extra seconds after a sighting when playing a clip
  *   coyote:
  *     enabled: true
  *     cameras: [Driveway, Front]  # where a lone night-time dog counts
  *     start: '23:00'
  *     end: '05:00'
  *     person_window: 120          # seconds either side to look for a person
- *   species:                      # replaces the built-in list when given
+ *   species:                      # omit for the built-in list, set 'auto' for dynamic discovery, or list custom groups
  *     - { id: rodent, name: Rodents, labels: [rodent], glyph: 🐀 }
  */
 (() => {
@@ -41,6 +43,95 @@
     { id: 'squirrel', name: 'Squirrels', one: 'Squirrel', labels: ['squirrel'], glyph: '🐿️' },
     { id: 'other', name: 'Others', one: 'Other', labels: ['fox', 'skunk', 'possum', 'snake'], glyph: '🐾' },
   ];
+
+  // Non-wildlife detector classes excluded when species: auto discovers labels.
+  const NON_WILDLIFE = new Set([
+    'person', 'human', 'face', 'car', 'vehicle', 'bicycle', 'motorcycle',
+    'bus', 'train', 'truck', 'boat', 'blank', 'none', 'on_demand',
+  ]);
+  const EMPTY_SUB = new Set(['blank', 'none', 'unknown', 'animal', 'wildlife']);
+
+  const GLYPH_RULES = [
+    [/coyote|wolf|wolves/, '🐺'],
+    [/squirrel|chipmunk|marmot|groundhog|woodchuck|gopher/, '🐿️'],
+    [/\bfox\b/, '🦊'],
+    [/raccoon|coati|ringtail/, '🦝'],
+    [/\bskunk\b/, '🦨'],
+    [/badger|wolverine/, '🦡'],
+    [/otter/, '🦦'],
+    [/beaver/, '🦫'],
+    [/rabbit|hare|cottontail/, '🐇'],
+    [/rodent|\brat\b|\bmice\b|\bmouse\b|vole|woodrat|deermouse|shrew/, '🐀'],
+    [/hedgehog|porcupine/, '🦔'],
+    [/\bcat\b|lynx|bobcat|cougar|puma|feline/, '🐈'],
+    [/\bdog\b|canine|canid|puppy/, '🐕'],
+    [/deer|stag|elk|moose|antelope/, '🦌'],
+    [/\bbear\b/, '🐻'],
+    [/\bpig\b|boar|\bhog\b|peccary/, '🐗'],
+    [/cattle|\bcow\b|\bbull\b|bison|buffalo/, '🐄'],
+    [/horse|pony|donkey|mule/, '🐎'],
+    [/goat/, '🐐'],
+    [/sheep|bighorn/, '🐑'],
+    [/\bowl\b/, '🦉'],
+    [/eagle|hawk|falcon|osprey|vulture/, '🦅'],
+    [/duck|mallard|teal|goose|geese|swan|waterfowl/, '🦆'],
+    [/turkey/, '🦃'],
+    [/chicken|rooster|pheasant|quail|grouse|gamebird/, '🐓'],
+    [/heron|egret|crane|stork|pelican/, '🦩'],
+    [/dove|pigeon/, '🕊️'],
+    [/parrot|macaw|parakeet/, '🦜'],
+    [/bird|junco|sparrow|cardinal|finch|wren|thrush|robin|mockingbird|woodpecker|chickadee|\btit\b|nuthatch|warbler|towhee|swallow|oriole|tanager|hummingbird|kingfisher|crow|raven|\bjay\b|magpie|blackbird|grackle|starling|songbird/, '🐦'],
+    [/snake|viper|python|rattlesnake/, '🐍'],
+    [/lizard|gecko|iguana|\bskink\b|chameleon|reptile/, '🦎'],
+    [/turtle|tortoise/, '🐢'],
+    [/frog|toad|salamander|newt|amphibian/, '🐸'],
+    [/\bbat\b/, '🦇'],
+  ];
+
+  const SMALL_WORDS = new Set(['of', 'and', 'or', 'the', 'in', 'on', 'at', 'to', 'a', 'an']);
+  const subOf = (e) => (Array.isArray(e?.sub_label) ? e.sub_label[0] : e?.sub_label);
+  const normKey = (s) => String(s || '').trim().toLowerCase().replace(/[_\s]+/g, ' ').replace(/\bgrey\b/g, 'gray');
+  const slugId = (s) => normKey(s).replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'animal';
+  const normMap = (obj) => {
+    const out = {};
+    if (obj && typeof obj === 'object') for (const [k, v] of Object.entries(obj)) out[normKey(k)] = String(v);
+    return out;
+  };
+  const titleCase = (s) => String(s || '').trim().split(/\s+/).filter(Boolean).map((w, i) => {
+    const lw = w.toLowerCase();
+    return i > 0 && SMALL_WORDS.has(lw) ? lw : lw.replace(/(^|-)([a-z])/g, (_, sep, c) => sep + c.toUpperCase());
+  }).join(' ');
+  const formatLabel = (raw, aliases = {}) => {
+    let s = String(raw || '').trim();
+    if (!s) return 'Animal';
+    const rawKey = normKey(s);
+    if (aliases[rawKey]) return titleCase(aliases[rawKey]);
+    if (s.includes(';')) {
+      const parts = s.split(';').map((p) => p.trim());
+      s = (parts.length >= 6 && parts[parts.length - 1]) || parts.slice(1, 6).filter(Boolean).join(' ') || s;
+    }
+    const paren = /^(.+?)\s*\([A-Z][a-z]+(?:\s+[a-z]+){0,2}\)$/.exec(s);
+    if (paren) s = paren[1];
+    s = normKey(s);
+    if (aliases[s]) return titleCase(aliases[s]);
+    const tax = /^(.+?)\s+(family|order|class|kingdom|species|genus)$/.exec(s);
+    if (tax && aliases[tax[1]]) {
+      const base = aliases[tax[1]];
+      return titleCase(tax[2] === 'family' ? `${base} family` : base);
+    }
+    return titleCase(s);
+  };
+  const glyphFor = (name, raw = '', glyphs = {}) => {
+    const custom = glyphs[normKey(name)] || glyphs[normKey(raw)];
+    if (custom) return custom;
+    const hay = `${name} ${raw}`.toLowerCase();
+    for (const [re, g] of GLYPH_RULES) if (re.test(hay)) return g;
+    return '🐾';
+  };
+  const isDogLike = (label, sub) => {
+    const l = normKey(label); const s = normKey(sub);
+    return l === 'dog' || s === 'dog' || s === 'domestic dog' || s === 'canis familiaris' || s === 'canis lupus familiaris';
+  };
 
   const ICON = {
     tune: 'M3,17V19H9V17H3M3,5V7H13V5H3M13,21V19H21V17H13V15H11V21H13M7,9V11H3V13H7V15H9V9H7M21,13V11H11V13H21M15,9H17V7H21V5H17V3H15V9Z',
@@ -185,6 +276,9 @@
     setConfig(config) {
       const c = config || {};
       const coy = c.coyote || {};
+      const auto = c.species === 'auto';
+      const custom = !auto && Array.isArray(c.species) && c.species.length > 0;
+      const list = auto ? null : (custom ? c.species : DEFAULT_SPECIES);
       this._cfg = {
         title: c.title ?? 'Wildlife',
         icon: c.icon || 'mdi:binoculars',
@@ -192,11 +286,17 @@
         refresh: Math.max(60, +c.refresh || 300),
         sun: c.sun_shading !== false,
         indoor: (c.indoor_cameras || ['Attic', 'Crawlspace']).map((s) => s.toLowerCase()),
+        ignore: new Set([...NON_WILDLIFE, ...(Array.isArray(c.ignore_labels) ? c.ignore_labels.map(normKey) : [])]),
+        aliases: normMap(c.aliases),
+        glyphs: normMap(c.glyphs),
+        customSpecies: custom,
+        clipLeadIn: c.clip_lead_in != null && c.clip_lead_in !== '' && Number.isFinite(+c.clip_lead_in) ? Math.max(0, +c.clip_lead_in) : 0,
+        clipLeadOut: c.clip_lead_out != null && c.clip_lead_out !== '' && Number.isFinite(+c.clip_lead_out) ? Math.max(0, +c.clip_lead_out) : 0,
         frigate: { url: String(c.frigate_url || '').replace(/\/+$/, ''), addon: String(c.frigate_addon || '').trim() },
-        species: (Array.isArray(c.species) && c.species.length ? c.species : DEFAULT_SPECIES).map((s) => ({
+        species: list ? list.map((s) => ({
           id: s.id, name: s.name || pretty(s.id), one: s.one || (s.name || pretty(s.id)).replace(/e?s$/, ''),
           labels: s.labels || [s.id], glyph: s.glyph || '🐾',
-        })),
+        })) : null,
         coyote: {
           enabled: coy.enabled !== false,
           cameras: coy.cameras || ['Driveway', 'Front'],
@@ -212,6 +312,8 @@
         sp: null, cell: null, tune: false, cur: null, clip: false, limit: 60,
       };
       this._events = new Map();
+      this._dynMeta = new Map();
+      this._audio = new Set();
       this._people = new Map();
       this._loaded = false; this._error = null;
       if (this._root) { this._build(); this._fetch(true); }
@@ -286,6 +388,19 @@
       return typeof r === 'string' ? JSON.parse(r) : (r || []);
     }
 
+    async _wsSummary() {
+      const r = await this._hass.callWS({ type: 'frigate/events/summary', instance_id: this._cfg.instance });
+      return typeof r === 'string' ? JSON.parse(r) : (r || []);
+    }
+
+    _isIgnoredEvent(label, sub) {
+      const l = normKey(label); const s = normKey(sub);
+      if (this._cfg.ignore.has(l)) return true;
+      if (s && !EMPTY_SUB.has(s) && this._cfg.ignore.has(s)) return true;
+      if (l === 'unknown' && (!s || EMPTY_SUB.has(s))) return true;
+      return false;
+    }
+
     async _fetch(full) {
       if (!this._hass || this._busy) return;
       this._busy = true;
@@ -294,15 +409,52 @@
         const horizon = now - (this._ui.days + 1) * 86400;
         let after = horizon;
         if (!full && this._loaded && this._newest && this._span >= this._ui.days) after = Math.max(horizon, Math.floor(this._newest) - 7200);
-        const labels = [...new Set(this._cfg.species.flatMap((s) => s.labels))];
-        const jobs = [this._ws({ labels, after, limit: 10000 })];
         const coy = this._cfg.coyote;
-        if (coy.enabled) jobs.push(this._ws({ labels: ['dog'], cameras: coy.cameras, after, limit: 3000 }).catch(() => []));
-        const [wild, dogs = []] = await Promise.all(jobs);
-        if (full || after === horizon) this._events.clear();
-        const byLabel = new Map();
-        for (const s of this._cfg.species) for (const l of s.labels) if (!byLabel.has(l)) byLabel.set(l, s.id);
-        for (const e of wild) this._put(e, byLabel.get(e.label));
+        const summaryP = (!this._cfg.species || this._cfg.customSpecies) ? this._wsSummary().catch(() => null) : Promise.resolve(null);
+        let wild; let dogs = []; let byLabel;
+        if (this._cfg.species) {
+          byLabel = new Map();
+          for (const s of this._cfg.species) for (const l of s.labels) if (!byLabel.has(normKey(l))) byLabel.set(normKey(l), s.id);
+          const wanted = new Set(this._cfg.species.flatMap((s) => s.labels));
+          const dogsP = coy.enabled ? this._ws({ labels: ['dog'], cameras: coy.cameras, after, limit: 3000 }).catch(() => []) : Promise.resolve([]);
+          const summary = await summaryP;
+          if (Array.isArray(summary)) {
+            for (const x of summary) {
+              const sub = subOf(x);
+              if (x.label && sub && (byLabel.has(normKey(sub)) || (coy.enabled && isDogLike(x.label, sub)))) wanted.add(x.label);
+            }
+          }
+          [wild, dogs] = await Promise.all([this._ws({ labels: [...wanted], after, limit: 10000 }), dogsP]);
+        } else {
+          const summary = await summaryP;
+          if (Array.isArray(summary)) {
+            const labels = [...new Set(summary.filter((x) => x.label && !this._audio.has(normKey(x.label)) && !this._isIgnoredEvent(x.label, subOf(x))).map((x) => x.label))];
+            wild = labels.length ? await this._ws({ labels, after, limit: 10000 }) : [];
+          } else {
+            wild = await this._ws({ after, limit: 10000 });
+          }
+          if (coy.enabled && wild.length >= 10000 && coy.cameras?.length) {
+            dogs = await this._ws({ labels: ['dog'], cameras: coy.cameras, after, limit: 3000 }).catch(() => []);
+          }
+        }
+        if (coy.enabled) {
+          const coyCams = new Set(coy.cameras || []);
+          const seen = new Set(dogs.map((d) => d.id));
+          for (const e of wild) {
+            if (!e.false_positive && !seen.has(e.id) && coyCams.has(e.camera) && isDogLike(e.label, subOf(e))) {
+              dogs.push(e); seen.add(e.id);
+            }
+          }
+        }
+        if (full || after === horizon) { this._events.clear(); this._dynMeta.clear(); }
+        for (const e of wild) {
+          if (byLabel) {
+            const sub = subOf(e);
+            this._put(e, (sub && byLabel.get(normKey(sub))) || byLabel.get(normKey(e.label)));
+          } else {
+            this._put(e);
+          }
+        }
         await this._coyotes(dogs);
         for (const [id, e] of this._events) if (e.start < horizon) this._events.delete(id);
         this._newest = Math.max(0, ...[...this._events.values()].map((e) => e.start));
@@ -315,11 +467,31 @@
     }
 
     _put(e, species, extra) {
-      if (!species || e.false_positive) return;
-      const sub = Array.isArray(e.sub_label) ? e.sub_label[0] : e.sub_label;
+      /* Frigate files what it hears beside what it sees. Speech and smoke
+         alarms are not wildlife, and no list of names could keep up with the
+         audio labels a detector may report, so discovery goes by the event's
+         own type. A label written into an explicit species list is still
+         taken at its word. */
+      if (!this._cfg.species && !species && e.data?.type === 'audio') { this._audio.add(normKey(e.label)); return; }
+      if (e.false_positive) return;
+      const sub = subOf(e);
+      let sp = species;
+      let spName = '';
+      if (!this._cfg.species && !sp) {
+        if (this._isIgnoredEvent(e.label, sub)) return;
+        const subClean = sub && !EMPTY_SUB.has(normKey(sub)) ? sub : '';
+        const raw = subClean || e.label;
+        spName = formatLabel(raw, this._cfg.aliases);
+        sp = slugId(spName);
+        if (!this._dynMeta.has(sp)) this._dynMeta.set(sp, { id: sp, name: spName, one: spName, glyph: glyphFor(spName, raw, this._cfg.glyphs) });
+      } else if (sp === 'coyote' && !this._cfg.species && !this._dynMeta.has('coyote')) {
+        this._dynMeta.set('coyote', { id: 'coyote', name: 'Coyote', one: 'Coyote', glyph: '🐺' });
+        spName = 'Coyote';
+      }
+      if (!sp) return;
       const lt = this._local(e.start_time);
       this._events.set(e.id, {
-        id: e.id, sp: species, label: e.label, sub: sub || '', cam: e.camera, zones: e.zones || [],
+        id: e.id, sp, spName, label: e.label, sub: sub || '', cam: e.camera, zones: e.zones || [],
         start: e.start_time, end: e.end_time || null,
         score: e.data?.top_score ?? e.top_score ?? e.data?.score ?? 0,
         clip: !!e.has_clip, snap: !!e.has_snapshot, day: lt.day, hour: lt.hour, ...extra,
@@ -362,6 +534,21 @@
 
     _media(id, file) { return this._hass.hassUrl(`/api/frigate/${this._cfg.instance}/notifications/${id}/${file}`); }
     _thumb(e) { return this._media(e.id, 'thumbnail.jpg'); }
+    _clipPaths(e) {
+      const { clipLeadIn: before, clipLeadOut: after, instance } = this._cfg;
+      if ((before <= 0 && after <= 0) || !e.cam || !e.start) return null;
+      const start = Math.max(0, Math.floor(e.start - before));
+      const end = Math.ceil((e.end || Date.now() / 1000) + after);
+      const cam = encodeURIComponent(e.cam);
+      return {
+        hls: `/api/frigate/${instance}/vod/${cam}/start/${start}/end/${end}/index.m3u8`,
+        mp4: `/api/frigate/${instance}/recording/${cam}/start/${start}/end/${end}`,
+      };
+    }
+    async _signPath(path) {
+      const r = await this._hass.callWS({ type: 'auth/sign_path', path, expires: 3600 });
+      return r?.path ? this._hass.hassUrl(r.path) : '';
+    }
 
     /* If the unauthenticated notification proxy is switched off, retry once
        through an HA signed path. */
@@ -535,11 +722,39 @@
       const { sp, cell } = this._ui;
       return all.filter((e) => (!sp || e.sp === sp) && (!cell || ((cell.day == null || e.day === cell.day) && (cell.row == null || this._rowKey(e) === cell.row))));
     }
-    _spec(id) { return this._cfg.species.find((s) => s.id === id) || { id, name: pretty(id), one: pretty(id), glyph: '🐾' }; }
+    _species(all) {
+      if (this._cfg.species) return this._cfg.species;
+      const stats = new Map();
+      for (const e of all) {
+        let st = stats.get(e.sp);
+        if (!st) {
+          const meta = this._spec(e.sp);
+          st = { ...meta, count: 0, latest: 0 };
+          stats.set(e.sp, st);
+        }
+        st.count++;
+        if (e.start > st.latest) st.latest = e.start;
+      }
+      return [...stats.values()].sort((a, b) => {
+        if ((a.id === 'animal') !== (b.id === 'animal')) return a.id === 'animal' ? 1 : -1;
+        return b.count - a.count || b.latest - a.latest || a.name.localeCompare(b.name);
+      });
+    }
+    _spec(id) {
+      if (this._cfg.species) return this._cfg.species.find((s) => s.id === id) || { id, name: pretty(id), one: pretty(id), glyph: '🐾' };
+      const name = formatLabel(id, this._cfg.aliases);
+      return this._dynMeta.get(id) || { id, name, one: name, glyph: glyphFor(name, id, this._cfg.glyphs) };
+    }
     _name(e) {
       if (e.inferred) return e.pack > 1 ? `Likely coyotes ×${e.pack}` : 'Likely coyote';
-      const base = e.sp === 'other' || !this._spec(e.sp).one ? pretty(e.label) : this._spec(e.sp).one;
-      return e.sub ? `${base} · ${pretty(e.sub)}` : base;
+      const spec = this._spec(e.sp);
+      if (this._cfg.species) {
+        const base = e.sp === 'other' || !spec.one ? pretty(e.label) : spec.one;
+        return e.sub && !EMPTY_SUB.has(normKey(e.sub)) && normKey(e.sub) !== normKey(base) ? `${base} · ${pretty(e.sub)}` : base;
+      }
+      const subPretty = e.sub ? formatLabel(e.sub, this._cfg.aliases) : '';
+      const base = spec.one || formatLabel(e.label, this._cfg.aliases);
+      return subPretty && !EMPTY_SUB.has(normKey(e.sub)) && normKey(subPretty) !== normKey(base) ? `${base} · ${subPretty}` : base;
     }
 
     /* Headline: alerts first, otherwise which animals are running above or
@@ -551,14 +766,16 @@
       const low = (s) => s.charAt(0).toLowerCase() + s.slice(1);
       const list = (a) => (a.length < 2 ? a.join('') : a.length === 2 ? `${a[0]} and ${a[1]}` : `${a[0]}, ${a[1]} and ${a.length - 2} more`);
       const fmtN = (x) => (x < 10 ? x.toFixed(1).replace(/\.0$/, '') : String(Math.round(x)));
+      const isRodent = (e) => e.sp === 'rodent' || /\b(rodent|rat|rats|mouse|mice|vole|gopher|woodrat|deermouse|muridae|cricetidae)\b/i.test(`${e.spName || ''} ${e.sub || ''} ${e.label || ''}`);
+      const isCat = (e) => e.sp === 'cat' || e.sp === 'domestic_cat';
       const up = []; const down = []; const notes = [];
-      for (const s of this._cfg.species) {
+      for (const s of this._species(all)) {
         const l = all.filter((e) => e.sp === s.id); if (!l.length) continue;
         const rec = l.filter((e) => now - e.start < D3).length; const base = (l.length - rec) / per3;
         if (rec >= 3 && rec >= 1.8 * Math.max(base, 0.5)) { up.push(s); notes.push(`${s.name} ${rec} in 3 days (usual ${fmtN(base)})`); }
         else if (base >= 3 && rec <= 0.5 * base) { down.push(s); notes.push(`${s.name} down, ${rec} in 3 days (usual ${fmtN(base)})`); }
       }
-      const rod = all.filter((e) => e.sp === 'rodent'); const cat = all.filter((e) => e.sp === 'cat');
+      const rod = all.filter(isRodent); const cat = all.filter(isCat);
       if (rod.length >= 4 && cat.length >= 4) {
         const keys = this._days().map((d) => d.key); const cnt = (l) => keys.map((k) => l.filter((e) => e.day === k).length);
         const x = cnt(rod); const y = cnt(cat); const n = keys.length; const mx = x.reduce((a, v) => a + v, 0) / n; const my = y.reduce((a, v) => a + v, 0) / n;
@@ -583,11 +800,11 @@
       const rec = all.filter((e) => now - e.start < D3).length;
       const s = notes.length ? notes.join(' · ') : (all.length ? `${rec} sightings in 3 days, in line with the last ${days}` : 'No wildlife recorded in this period');
       if (pack) return { rgb: R, icon: 'mdi:alert-circle', p: `Likely coyote pack · ${pretty(pack.cam)} · ${this._when(pack.start)}`, s };
-      if (inside) return { rgb: R, icon: 'mdi:alert-circle', p: `Rodent inside · ${pretty(inside.cam)} · ${this._when(inside.start)}`, s };
-      const warn = coy || up.some((x) => x.id === 'rodent' || x.id === 'coyote');
-      const names = (a) => { const n = a.map((x) => x.name); return list([n[0], ...n.slice(1).map(low)]); };
+      if (inside) return { rgb: R, icon: 'mdi:alert-circle', p: `${this._cfg.species ? 'Rodent' : this._name(inside)} inside · ${pretty(inside.cam)} · ${this._when(inside.start)}`, s };
+      const warn = coy || up.some((x) => x.id === 'coyote' || isRodent({ sp: x.id, spName: x.name }));
+      const names = (a) => { const n = a.map((x) => x.name); return this._cfg.species ? list([n[0], ...n.slice(1).map(low)]) : list(n); };
       let p = 'Wildlife activity steady';
-      if (up.length && down.length) p = `${names(up)} up, ${low(names(down))} down`;
+      if (up.length && down.length) p = `${names(up)} up, ${this._cfg.species ? low(names(down)) : names(down)} down`;
       else if (up.length) p = `${names(up)} more active than usual`;
       else if (down.length) p = `${names(down)} quieter than usual`;
       return { rgb: warn ? A : G, icon: this._cfg.icon, p, s };
@@ -644,7 +861,7 @@
     }
 
     _tiles(all) {
-      const html = this._cfg.species.map((s) => {
+      const html = this._species(all).map((s) => {
         const list = all.filter((e) => e.sp === s.id);
         const best = list.slice(0, 8).sort((a, b) => b.score - a.score)[0];
         const pack = s.id === 'coyote' && list.some((e) => (e.pack || 1) > 1);
@@ -660,7 +877,7 @@
       const u = this._ui; const days = this._days(); const f = this._fmt();
       const src = u.view === 'species' ? all : all.filter((e) => !u.sp || e.sp === u.sp);
       let rows;
-      if (u.view === 'species') rows = this._cfg.species.map((s) => ({ key: s.id, label: `${s.glyph} ${s.name}`, on: u.sp === s.id }));
+      if (u.view === 'species') rows = this._species(all).map((s) => ({ key: s.id, label: `${s.glyph} ${s.name}`, on: u.sp === s.id }));
       else if (u.view === 'hour') {
         rows = Array.from({ length: 12 }, (_, i) => {
           const from = `${(i * 2) % 12 || 12}${i < 6 ? 'a' : 'p'}`;
@@ -699,7 +916,7 @@
       const title = u.view === 'species' ? 'Sightings per day' : u.view === 'hour' ? `${sp} · time of day` : `${sp} · by camera`;
       const seg = [['species', 'Species'], ['hour', 'Time'], ['camera', 'Location']].map(([v, l]) => `<button data-act="view" data-v="${v}" aria-pressed="${u.view === v}">${l}</button>`).join('');
       this._$('.chart').innerHTML = `<div class="sub"><h3>${esc(title)}</h3><span class="seg" role="group">${seg}</span></div>
-        <div class="grid${today ? ' sky' : ''}${u.view === 'hour' ? ' hours' : ''}" style="--lab:${u.view === 'camera' ? '104px' : u.view === 'hour' ? '66px' : '92px'};--ch:${u.view === 'hour' ? '13px' : '18px'}">
+        <div class="grid${today ? ' sky' : ''}${u.view === 'hour' ? ' hours' : ''}" style="--lab:${u.view === 'camera' ? '104px' : u.view === 'hour' ? '66px' : this._cfg.species ? '92px' : 'clamp(96px, 28%, 144px)'};--ch:${u.view === 'hour' ? '13px' : '18px'}">
           ${rows.length ? `<div class="rows">${body}</div><div class="axis"><i></i><div>${ticks}</div><i></i></div>` : '<div class="empty" style="padding-left:0">Nothing to chart for this selection.</div>'}
           <div class="tip" hidden></div></div>
         <div class="key"><span>fewer</span><u style="--a:.3"></u><u style="--a:.55"></u><u style="--a:.75"></u><u style="--a:1"></u><span>more${u.view === 'species' ? ' · each row on its own scale' : ''}</span></div>`;
@@ -737,8 +954,9 @@
       const still = e.snap ? this._media(e.id, 'snapshot.jpg') : this._thumb(e);
       const frig = this._frigateHere() ? '' : this._frigateLink(e.id);
       const away = this._signed(e);
+      const pad = this._ui.clip && e.clip ? this._clipPaths(e) : null;
       const media = this._ui.clip && e.clip
-        ? `<video class="media" controls playsinline muted preload="metadata" poster="${esc(still)}" data-hls="${esc(this._media(e.id, 'index.m3u8'))}" data-mp4="${esc(this._media(e.id, 'clip.mp4'))}"></video>`
+        ? `<video class="media" controls playsinline muted preload="metadata" poster="${esc(still)}"${pad ? ` data-vod-hls="${esc(pad.hls)}" data-vod-mp4="${esc(pad.mp4)}"` : ''} data-hls="${esc(this._media(e.id, 'index.m3u8'))}" data-mp4="${esc(this._media(e.id, 'clip.mp4'))}"></video>`
         : `<img class="media" alt="${esc(this._name(e))}" data-id="${esc(e.id)}" data-kind="${e.snap ? 'snapshot' : 'thumbnail'}" src="${esc(still)}">`;
       const dur = e.end ? Math.max(1, Math.round(e.end - e.start)) : null;
       const meta = [pretty(e.cam), `${Math.round(e.score * 100)}%${e.inferred ? ' as dog' : ''}`, dur ? (dur >= 90 ? `${Math.round(dur / 60)} min` : `${dur}s`) : 'in progress', ...e.zones.slice(0, 2).map(pretty)];
@@ -760,31 +978,61 @@
       this._root.querySelector('.shot[aria-current="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
     }
 
-    /* Play order: hls.js, then the browser's own HLS, then the file. Home
-       Assistant's media browser uses hls.js and plays recordings that Apple's
-       native player rejects outright — same file, same connection — so the
-       library goes first wherever it works, and each step falls to the next. */
+    /* Play order: padded VOD via hls.js (with signed segment auth), event HLS
+       via hls.js, browser native HLS, padded recording MP4, then event MP4.
+       Home Assistant's Frigate integration serves padded clips via /vod and
+       /recording; falling back to /notifications ensures old or unpadded events
+       still play even when continuous/motion retention has expired. */
+    async _attachHls(v, url, failFlag, sig) {
+      const Hls = await this._hlsLib();
+      if (!Hls || !Hls.isSupported() || !v.isConnected) return false;
+      const hls = new Hls({
+        enableWorker: false,
+        ...(sig ? {
+          xhrSetup(xhr, reqUrl) {
+            if (!reqUrl.includes('authSig=')) {
+              xhr.open('GET', `${reqUrl}${reqUrl.includes('?') ? '&' : '?'}authSig=${encodeURIComponent(sig)}`, true);
+            }
+          },
+        } : {}),
+      });
+      v._hls = hls;
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        if (!data.fatal) return;
+        hls.destroy(); v._hls = null; v.dataset[failFlag] = '1'; this._attachMedia(v);
+      });
+      hls.on(Hls.Events.MANIFEST_PARSED, () => v.play().catch(() => {}));
+      hls.loadSource(url);
+      hls.attachMedia(v);
+      return true;
+    }
+
     async _attachMedia(v) {
       const play = () => v.play().catch(() => {});
+      if (v.dataset.vodHls && !v.dataset.noVodLib) {
+        try {
+          const signed = await this._signPath(v.dataset.vodHls);
+          if (!v.isConnected) return;
+          const sig = signed ? new URL(signed, location.href).searchParams.get('authSig') : '';
+          if (signed && await this._attachHls(v, signed, 'noVodLib', sig)) return;
+        } catch (err) { /* fall through to event HLS */ }
+        v.dataset.noVodLib = '1';
+      }
       if (v.dataset.hls && !v.dataset.noLib) {
-        const Hls = await this._hlsLib();
-        if (Hls && Hls.isSupported() && v.isConnected) {
-          const hls = new Hls({ enableWorker: false });
-          v._hls = hls;
-          hls.on(Hls.Events.ERROR, (_event, data) => {
-            if (!data.fatal) return;
-            hls.destroy(); v._hls = null; v.dataset.noLib = '1'; this._attachMedia(v);
-          });
-          hls.on(Hls.Events.MANIFEST_PARSED, play);
-          hls.loadSource(v.dataset.hls);
-          hls.attachMedia(v);
-          return;
-        }
+        if (await this._attachHls(v, v.dataset.hls, 'noLib')) return;
       }
       if (v.dataset.hls && !v.dataset.noNative && v.canPlayType('application/vnd.apple.mpegurl')) {
         v.dataset.noNative = '1';
         v.src = v.dataset.hls; v.load(); play();
         return;
+      }
+      if (v.dataset.vodMp4 && !v.dataset.noVodMp4) {
+        v.dataset.noVodMp4 = '1';
+        try {
+          const signed = await this._signPath(v.dataset.vodMp4);
+          if (!v.isConnected) return;
+          if (signed) { v.src = signed; v.load(); play(); return; }
+        } catch (err) { /* fall through to event MP4 */ }
       }
       if (v.dataset.mp4) {
         const url = v.dataset.mp4; delete v.dataset.mp4;
@@ -877,9 +1125,13 @@
     min_score: ['Opening confidence', 'Sightings below this are hidden until you move the slider on the card.'],
     sun_shading: ['Day/night shading', 'Shade the time-of-day rows for daylight, darkness, dawn and dusk.'],
     indoor_cameras: ['Indoor cameras', 'A rodent on these is an alert rather than a sighting.'],
+    auto: ['Discover species automatically', 'Build the tiles from whatever animals Frigate reports, sub-labels included, instead of the built-in groups. People, vehicles and sounds are left out.'],
+    ignore_labels: ['Labels to leave out', 'Anything else discovery should skip, e.g. dog.'],
     instance_id: ['Frigate instance', 'Its MQTT client id. Only matters with more than one Frigate.'],
     frigate_addon: ['Frigate add-on', 'Its slug, for a Frigate running as an add-on. Adds a button that opens the sighting in Frigate.'],
     frigate_url: ['Frigate address', 'For a Frigate that is not an add-on, e.g. http://192.168.1.10:5000. Used in preference to the slug.'],
+    clip_lead_in: ['Clip lead-in', 'Extra seconds before a sighting when playing a clip (uses Frigate recordings).'],
+    clip_lead_out: ['Clip lead-out', 'Extra seconds after a sighting when playing a clip (uses Frigate recordings).'],
     coyote: ['Coyotes', ''],
     enabled: ['Infer coyotes from night-time dogs', 'Frigate cannot detect a coyote, so a dog alone at night stands in for one.'],
     cameras: ['Cameras to watch', 'Where a night-time dog counts as a likely coyote.'],
@@ -894,8 +1146,14 @@
     coyote: { enabled: true, cameras: ['Driveway', 'Front'], start: '23:00', end: '05:00', person_window: 120 },
   };
 
-  const schema = (cameras) => {
+  const schema = (cameras, labels = [], species) => {
     const pick = { select: { multiple: true, custom_value: true, mode: 'dropdown', options: cameras } };
+    /* A species list written out in YAML is the user's own work; the switch
+       is only offered where turning it would not throw one away. */
+    const discovery = Array.isArray(species) ? [] : [
+      { name: 'auto', selector: { boolean: {} } },
+      ...(species === 'auto' ? [{ name: 'ignore_labels', selector: { select: { multiple: true, custom_value: true, mode: 'dropdown', options: labels } } }] : []),
+    ];
     return [
       { name: 'title', selector: { text: {} } },
       { name: 'icon', selector: { icon: {} } },
@@ -906,11 +1164,16 @@
       ] },
       { name: 'min_score', selector: { number: { min: 50, max: 99, step: 1, mode: 'slider', unit_of_measurement: '%' } } },
       { name: 'sun_shading', selector: { boolean: {} } },
+      ...discovery,
       { name: 'indoor_cameras', selector: pick },
       { name: 'instance_id', selector: { text: {} } },
       { type: 'grid', name: '', schema: [
         { name: 'frigate_addon', selector: { text: {} } },
         { name: 'frigate_url', selector: { text: {} } },
+      ] },
+      { type: 'grid', name: '', schema: [
+        { name: 'clip_lead_in', selector: { number: { min: 0, max: 60, step: 1, mode: 'box', unit_of_measurement: 'seconds' } } },
+        { name: 'clip_lead_out', selector: { number: { min: 0, max: 60, step: 1, mode: 'box', unit_of_measurement: 'seconds' } } },
       ] },
       { type: 'expandable', name: 'coyote', title: FIELDS.coyote[0], icon: 'mdi:paw', schema: [
         { name: 'enabled', selector: { boolean: {} } },
@@ -948,7 +1211,17 @@
         });
         const events = typeof res === 'string' ? JSON.parse(res) : res || [];
         const names = [...new Set(events.map((e) => e.camera).filter(Boolean))].sort();
-        if (names.length) { this._cameras = names.map((c) => ({ value: c, label: pretty(c) })); this._render(); }
+        if (names.length) this._cameras = names.map((c) => ({ value: c, label: pretty(c) }));
+        /* What discovery would show, offered as things to leave out. */
+        const seen = new Set();
+        for (const e of events) {
+          if (e.data?.type === 'audio' || NON_WILDLIFE.has(normKey(e.label))) continue;
+          seen.add(e.label);
+          const sub = subOf(e);
+          if (sub && !EMPTY_SUB.has(normKey(sub))) seen.add(sub);
+        }
+        this._labels = [...seen].sort().map((l) => ({ value: l, label: formatLabel(l) }));
+        this._render();
       } catch (err) { /* the names can still be typed */ }
     }
 
@@ -958,6 +1231,8 @@
         ...DEFAULTS, ...c,
         days: String(c.days ?? DEFAULTS.days),
         coyote: { ...DEFAULTS.coyote, ...(c.coyote || {}) },
+        auto: c.species === 'auto',
+        ignore_labels: Array.isArray(c.ignore_labels) ? c.ignore_labels : [],
       };
     }
 
@@ -969,8 +1244,18 @@
         days: +v.days,
         coyote: { ...v.coyote, start: clock(v.coyote?.start), end: clock(v.coyote?.end) },
       };
-      /* An emptied text field should leave no key behind. */
-      for (const k of ['frigate_addon', 'frigate_url']) if (!config[k]) delete config[k];
+      /* The switch is the form's way of writing species: auto. Turning it off
+         removes the key, which restores the built-in groups; a list written
+         in YAML never reaches here, because the switch is not offered. */
+      if (!Array.isArray(this._config?.species)) {
+        if (v.auto) config.species = 'auto'; else delete config.species;
+      }
+      delete config.auto;
+      if (!Array.isArray(config.ignore_labels) || !config.ignore_labels.length) delete config.ignore_labels;
+      /* An emptied field should leave no key behind. */
+      for (const k of ['frigate_addon', 'frigate_url', 'clip_lead_in', 'clip_lead_out']) {
+        if (config[k] === '' || config[k] == null) delete config[k];
+      }
       this.dispatchEvent(new CustomEvent('config-changed', { detail: { config }, bubbles: true, composed: true }));
     }
 
@@ -979,7 +1264,7 @@
       if (!this._form) {
         const note = document.createElement('ha-alert');
         note.setAttribute('alert-type', 'info');
-        note.textContent = 'Species groups are edited in YAML. Anything set here is kept when you switch.';
+        note.textContent = 'Custom species groups, display-name aliases and tile glyphs are edited in YAML. Anything set there is kept when you switch.';
         note.style.display = 'block';
         note.style.marginBottom = '12px';
         this.appendChild(note);
@@ -988,7 +1273,7 @@
         this.appendChild(this._form);
       }
       this._form.hass = this._hass;
-      this._form.schema = schema(this._cameras || []);
+      this._form.schema = schema(this._cameras || [], this._labels || [], this._config.species);
       this._form.data = this._data();
       this._form.computeLabel = (s) => FIELDS[s.name]?.[0] || pretty(s.name);
       this._form.computeHelper = (s) => FIELDS[s.name]?.[1] || '';
