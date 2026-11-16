@@ -17,3 +17,5 @@ jobs:
         with:
           files: dist/*
           generate_release_notes: true
+          # A tag with a hyphen (v1.4.0-beta.1) is a trial: HACS offers it only to those who ask for betas.
+          prerelease: ${{ contains(github.ref_name, '-') }}

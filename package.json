@@ -1,6 +1,6 @@
 {
   "name": "wildlife-card",
-  "version": "1.3.5",
+  "version": "1.4.0-beta.1",
   "description": "Frigate wildlife activity, trends and sightings browser for Home Assistant",
   "type": "module",
   "private": true,
