@@ -297,6 +297,17 @@ const shot = async (page, name) => {
   check((await page.text$(".stage .err")).includes("could not be reached"), "a Frigate that cannot be reached explains itself");
   check(!(await page.$(`wildlife-card ${SEL}`)), "and offers no link at all rather than a broken one");
   await page.close();
+
+  // Ingress is for administrators. Another user, or a visitor to a read-only
+  // public view, gets no button and no complaint under every sighting.
+  {
+    const page = await open("&guest&config=" + encodeURIComponent('{"frigate_addon":"ccab4aaf_frigate-fa"}'));
+    await page.click$(".shot");
+    await page.waitForSelector('wildlife-card a[aria-label="Open the picture in a new tab"]');
+    check(!(await page.$("wildlife-card .stage .err")), "a viewer who may not open Frigate is told nothing about it");
+    check(!(await page.$(`wildlife-card ${SEL}`)), "and gets no Frigate button");
+    await page.close();
+  }
 }
 
 await browser.close();

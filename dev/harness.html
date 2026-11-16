@@ -127,6 +127,8 @@ const hass = {
   async callWS(msg) {
     // Supervisor stands in for an add-on behind ingress, reissuing its token.
     if (msg.type === 'supervisor/ingress/info') {
+      // ... and answers administrators only, as Home Assistant words it.
+      if (new URLSearchParams(location.search).has('guest')) throw { code: 'unauthorized', message: 'Unauthorized' };
       if (msg.slug !== 'ccab4aaf_frigate-fa') throw new Error('Add-on not found');
       return { name: 'Frigate', slug: msg.slug, ingress_url: '/api/hassio_ingress/TOKEN-OF-THE-MOMENT/' };
     }

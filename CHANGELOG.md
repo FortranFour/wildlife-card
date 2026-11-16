@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.5 — 2026-11-15
+
+- **No error under every sighting for viewers who are not administrators.** The Frigate button's address comes from the Supervisor, which answers administrators only. For anyone else (another user of the house, or a visitor to a dashboard published read-only) the card reported "Frigate could not be reached" in a box under the picture. Such a viewer has no Frigate page to open, so the button is now simply left out. A Frigate that is really unreachable still says so.
+
 ## 1.3.4 — 2026-11-14
 
 - **Inside the Companion apps the Frigate button opens Home Assistant's own Frigate panel.** 1.3.3 sent the app's view to the ingress address, and the app answered by reloading the frontend, so the tap landed on the default dashboard and never reached Frigate. The panel is the one route known to work there. It opens Frigate's front page rather than the sighting; browsers keep the link to the sighting itself, as does a plain `frigate_url`.

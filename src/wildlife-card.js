@@ -401,7 +401,12 @@
             if (s?.session) document.cookie = `ingress_session=${s.session};path=/api/hassio_ingress/;SameSite=Strict${location.protocol === 'https:' ? ';Secure' : ''}`;
             base = this._hass.hassUrl(entry[1]);
           } catch (e) {
-            err = `Frigate could not be reached: ${e?.message || e}.`;
+            /* Ingress belongs to the Supervisor, which answers administrators
+               only. Anyone else (another member of the household, a visitor
+               to a read-only public view) has no Frigate page to open. That
+               is not a fault to report under every sighting: the button is
+               simply left out. */
+            err = e?.code === 'unauthorized' ? '' : `Frigate could not be reached: ${e?.message || e}.`;
           }
           this._fb = { base, err, at: Date.now() };
           this._fbWait = null;
