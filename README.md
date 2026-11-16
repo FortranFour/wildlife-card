@@ -76,6 +76,8 @@ Quote `start` and `end`. Unquoted, YAML reads `23:00` as a number and the night 
 | `indoor_cameras` | `[Attic, Crawlspace]` | Cameras where a rodent is an alert rather than a sighting. |
 | `frigate_addon` | — | Add-on slug, e.g. `ccab4aaf_frigate-fa`. Adds a button that opens the sighting in Frigate's Explore view, resolving the ingress address when tapped. Ingress is for administrators, so other users, and visitors to a dashboard published read-only, get no button. |
 | `frigate_url` | — | Same button for a Frigate that is not an add-on, e.g. `http://192.168.1.10:5000`. Used in preference to the slug. |
+| `clip_lead_in` | `0` | Extra seconds of recording before the sighting when playing a clip (`0` uses the event clip directly). |
+| `clip_lead_out` | `0` | Extra seconds of recording after the sighting when playing a clip (`0` uses the event clip directly). |
 | `coyote.enabled` | `true` | Infer coyotes from night-time dogs. See below. |
 | `coyote.cameras` | `[Driveway, Front]` | Cameras the inference looks at. |
 | `coyote.start` | `'23:00'` | Start of the night window. |
