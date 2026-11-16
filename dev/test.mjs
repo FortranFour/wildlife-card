@@ -423,6 +423,58 @@ const shot = async (page, name) => {
   await page.close();
 }
 
+/* 13 — discovery goes by what Frigate saw, not what it heard */
+{
+  const tiles = async (cfg) => {
+    const page = await open("&audio=1&config=" + encodeURIComponent(JSON.stringify(cfg)));
+    await page.waitForSelector("wildlife-card .tile");
+    const names = await page.$$eval("wildlife-card .tile b", (els) => els.map((e) => e.textContent.trim().toLowerCase()));
+    await page.close();
+    return names;
+  };
+  const auto = await tiles({ species: "auto" });
+  check(auto.length > 2 && !auto.some((n) => /speech|fire alarm/.test(n)), `sounds are left out of automatic discovery (${auto.slice(0, 5).join(", ")}…)`);
+  const dropped = await tiles({ species: "auto", ignore_labels: ["bird"] });
+  check(!dropped.includes("bird") && auto.includes("bird"), "and ignore_labels removes one that was there");
+  const asked = await tiles({ species: [{ id: "voices", name: "Voices", labels: ["speech"] }] });
+  check(asked.join() === "voices", "while a label written into a species list is taken at its word");
+}
+
+/* 14 — the editor's switch for discovery */
+{
+  const page = await open("&audio=1");
+  const out = await page.evaluate(async () => {
+    const make = async (config) => {
+      const ed = customElements.get("wildlife-card").getConfigElement();
+      document.body.appendChild(ed);
+      ed.setConfig(config); ed.hass = window.hass;
+      await new Promise((r) => setTimeout(r, 300));
+      return ed;
+    };
+    const names = (ed) => JSON.stringify(ed.querySelector("ha-form").schema).match(/"name":"(auto|ignore_labels)"/g) || [];
+    const fire = (ed, value) => new Promise((res) => {
+      ed.addEventListener("config-changed", (ev) => res(ev.detail.config), { once: true });
+      ed.querySelector("ha-form").dispatchEvent(new CustomEvent("value-changed", { detail: { value } }));
+    });
+    const plain = await make({ type: "custom:wildlife-card", title: "Yard" });
+    const base = plain.querySelector("ha-form").data;
+    const on = await fire(plain, { ...base, auto: true });
+    const autoEd = await make({ type: "custom:wildlife-card", species: "auto", ignore_labels: ["dog"], aliases: { a: "B" } });
+    const autoData = autoEd.querySelector("ha-form").data;
+    const off = await fire(autoEd, { ...autoData, auto: false, ignore_labels: [] });
+    const opts = JSON.stringify(autoEd.querySelector("ha-form").schema);
+    const custom = await make({ type: "custom:wildlife-card", species: [{ id: "x", name: "X", labels: ["bird"] }] });
+    const kept = await fire(custom, { ...custom.querySelector("ha-form").data, title: "New" });
+    return { plain: names(plain), on, autoNames: names(autoEd), off, hasSpeech: /speech/i.test(opts), hasBird: /"bird"/.test(opts), customNames: names(custom), kept };
+  });
+  check(out.plain.length === 1, "the editor offers the discovery switch on an ordinary card");
+  check(out.on.species === "auto" && !("auto" in out.on), "turning it on writes species: auto and nothing else");
+  check(out.autoNames.length === 2 && out.hasBird && !out.hasSpeech, "with it on, labels to leave out are offered from what Frigate saw, sounds excluded");
+  check(!("species" in out.off) && !("ignore_labels" in out.off) && out.off.aliases?.a === "B", "turning it off removes the key and leaves the YAML-only options alone");
+  check(out.customNames.length === 0 && Array.isArray(out.kept.species) && out.kept.title === "New", "a species list written in YAML is neither offered the switch nor disturbed");
+  await page.close();
+}
+
 await browser.close();
 server.close();
 console.log(failures.length ? `\n${failures.length} check(s) failed` : `\nall checks passed — screenshots in dev/out/`);

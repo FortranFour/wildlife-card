@@ -79,6 +79,10 @@ for (let d = 0; d < 30; d++) {
     add('cat', pick(['Side_porch', 'Front_door', 'Bedroom_windows']), at(d, (20 + rnd() * 9) % 24), 25, 0.7 + rnd() * 0.28);
   if (d % 9 === 3) add('fox', 'Back_door', at(d, 4), 15, 0.78);
 }
+if (q.get('audio')) {                         // what Frigate hears is filed beside what it sees
+  for (let i = 0; i < 40; i++) { add('speech', 'Front', at(i % 20, 9 + (i % 8)), 5, 0.9); events.at(-1).data.type = 'audio'; }
+  add('fire_alarm', 'Backyard', at(2, 3), 4, 0.8); events.at(-1).data.type = 'audio';
+}
 if (!q.get('quiet')) {                       // two dogs at 2am, no person: a likely pack
   add('dog', 'Driveway', at(1, 2.2), 40, 0.88);
   add('dog', 'Driveway', at(1, 2.2) - 6, 35, 0.81);

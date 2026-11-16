@@ -313,6 +313,7 @@
       };
       this._events = new Map();
       this._dynMeta = new Map();
+      this._audio = new Set();
       this._people = new Map();
       this._loaded = false; this._error = null;
       if (this._root) { this._build(); this._fetch(true); }
@@ -427,7 +428,7 @@
         } else {
           const summary = await summaryP;
           if (Array.isArray(summary)) {
-            const labels = [...new Set(summary.filter((x) => x.label && !this._isIgnoredEvent(x.label, subOf(x))).map((x) => x.label))];
+            const labels = [...new Set(summary.filter((x) => x.label && !this._audio.has(normKey(x.label)) && !this._isIgnoredEvent(x.label, subOf(x))).map((x) => x.label))];
             wild = labels.length ? await this._ws({ labels, after, limit: 10000 }) : [];
           } else {
             wild = await this._ws({ after, limit: 10000 });
@@ -466,6 +467,12 @@
     }
 
     _put(e, species, extra) {
+      /* Frigate files what it hears beside what it sees. Speech and smoke
+         alarms are not wildlife, and no list of names could keep up with the
+         audio labels a detector may report, so discovery goes by the event's
+         own type. A label written into an explicit species list is still
+         taken at its word. */
+      if (!this._cfg.species && !species && e.data?.type === 'audio') { this._audio.add(normKey(e.label)); return; }
       if (e.false_positive) return;
       const sub = subOf(e);
       let sp = species;
@@ -1118,6 +1125,8 @@
     min_score: ['Opening confidence', 'Sightings below this are hidden until you move the slider on the card.'],
     sun_shading: ['Day/night shading', 'Shade the time-of-day rows for daylight, darkness, dawn and dusk.'],
     indoor_cameras: ['Indoor cameras', 'A rodent on these is an alert rather than a sighting.'],
+    auto: ['Discover species automatically', 'Build the tiles from whatever animals Frigate reports, sub-labels included, instead of the built-in groups. People, vehicles and sounds are left out.'],
+    ignore_labels: ['Labels to leave out', 'Anything else discovery should skip, e.g. dog.'],
     instance_id: ['Frigate instance', 'Its MQTT client id. Only matters with more than one Frigate.'],
     frigate_addon: ['Frigate add-on', 'Its slug, for a Frigate running as an add-on. Adds a button that opens the sighting in Frigate.'],
     frigate_url: ['Frigate address', 'For a Frigate that is not an add-on, e.g. http://192.168.1.10:5000. Used in preference to the slug.'],
@@ -1137,8 +1146,14 @@
     coyote: { enabled: true, cameras: ['Driveway', 'Front'], start: '23:00', end: '05:00', person_window: 120 },
   };
 
-  const schema = (cameras) => {
+  const schema = (cameras, labels = [], species) => {
     const pick = { select: { multiple: true, custom_value: true, mode: 'dropdown', options: cameras } };
+    /* A species list written out in YAML is the user's own work; the switch
+       is only offered where turning it would not throw one away. */
+    const discovery = Array.isArray(species) ? [] : [
+      { name: 'auto', selector: { boolean: {} } },
+      ...(species === 'auto' ? [{ name: 'ignore_labels', selector: { select: { multiple: true, custom_value: true, mode: 'dropdown', options: labels } } }] : []),
+    ];
     return [
       { name: 'title', selector: { text: {} } },
       { name: 'icon', selector: { icon: {} } },
@@ -1149,6 +1164,7 @@
       ] },
       { name: 'min_score', selector: { number: { min: 50, max: 99, step: 1, mode: 'slider', unit_of_measurement: '%' } } },
       { name: 'sun_shading', selector: { boolean: {} } },
+      ...discovery,
       { name: 'indoor_cameras', selector: pick },
       { name: 'instance_id', selector: { text: {} } },
       { type: 'grid', name: '', schema: [
@@ -1195,7 +1211,17 @@
         });
         const events = typeof res === 'string' ? JSON.parse(res) : res || [];
         const names = [...new Set(events.map((e) => e.camera).filter(Boolean))].sort();
-        if (names.length) { this._cameras = names.map((c) => ({ value: c, label: pretty(c) })); this._render(); }
+        if (names.length) this._cameras = names.map((c) => ({ value: c, label: pretty(c) }));
+        /* What discovery would show, offered as things to leave out. */
+        const seen = new Set();
+        for (const e of events) {
+          if (e.data?.type === 'audio' || NON_WILDLIFE.has(normKey(e.label))) continue;
+          seen.add(e.label);
+          const sub = subOf(e);
+          if (sub && !EMPTY_SUB.has(normKey(sub))) seen.add(sub);
+        }
+        this._labels = [...seen].sort().map((l) => ({ value: l, label: formatLabel(l) }));
+        this._render();
       } catch (err) { /* the names can still be typed */ }
     }
 
@@ -1205,6 +1231,8 @@
         ...DEFAULTS, ...c,
         days: String(c.days ?? DEFAULTS.days),
         coyote: { ...DEFAULTS.coyote, ...(c.coyote || {}) },
+        auto: c.species === 'auto',
+        ignore_labels: Array.isArray(c.ignore_labels) ? c.ignore_labels : [],
       };
     }
 
@@ -1216,6 +1244,14 @@
         days: +v.days,
         coyote: { ...v.coyote, start: clock(v.coyote?.start), end: clock(v.coyote?.end) },
       };
+      /* The switch is the form's way of writing species: auto. Turning it off
+         removes the key, which restores the built-in groups; a list written
+         in YAML never reaches here, because the switch is not offered. */
+      if (!Array.isArray(this._config?.species)) {
+        if (v.auto) config.species = 'auto'; else delete config.species;
+      }
+      delete config.auto;
+      if (!Array.isArray(config.ignore_labels) || !config.ignore_labels.length) delete config.ignore_labels;
       /* An emptied field should leave no key behind. */
       for (const k of ['frigate_addon', 'frigate_url', 'clip_lead_in', 'clip_lead_out']) {
         if (config[k] === '' || config[k] == null) delete config[k];
@@ -1228,7 +1264,7 @@
       if (!this._form) {
         const note = document.createElement('ha-alert');
         note.setAttribute('alert-type', 'info');
-        note.textContent = 'Species groups, dynamic discovery (species: auto), and label aliases are edited in YAML. Anything set here is kept when you switch.';
+        note.textContent = 'Custom species groups, display-name aliases and tile glyphs are edited in YAML. Anything set there is kept when you switch.';
         note.style.display = 'block';
         note.style.marginBottom = '12px';
         this.appendChild(note);
@@ -1237,7 +1273,7 @@
         this.appendChild(this._form);
       }
       this._form.hass = this._hass;
-      this._form.schema = schema(this._cameras || []);
+      this._form.schema = schema(this._cameras || [], this._labels || [], this._config.species);
       this._form.data = this._data();
       this._form.computeLabel = (s) => FIELDS[s.name]?.[0] || pretty(s.name);
       this._form.computeHelper = (s) => FIELDS[s.name]?.[1] || '';
