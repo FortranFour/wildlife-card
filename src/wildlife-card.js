@@ -323,6 +323,14 @@
     .stage .also { border-top:1px solid var(--divider-color,rgba(127,127,127,.3)); }
     .shotwrap { position:relative; background:#000; }
     .stage .shotwrap .nav { top:calc(50% - 18px); }
+    /* A video brings controls of its own, and where they sit is the browser's
+       business: along the bottom in one, in the top corners in another. The
+       card's close button and counter move to a band above the video, clear
+       of all of them. */
+    .stage.clip .shotwrap { padding-top:34px; }
+    .stage.clip .x { top:2px; }
+    .stage.clip .pos { top:6px; }
+    .stage.clip .shotwrap .nav { top:calc(50% - 1px); }
     .stage .media.spec { aspect-ratio:2/1; object-fit:fill; }
     .stage .player { display:block; width:100%; height:40px; background:var(--card-background-color,#fff); }
     .stage .note { padding:8px 12px; font-size:12px; line-height:16px; color:var(--secondary-text-color); background:var(--card-background-color,#fff); }
@@ -1405,7 +1413,7 @@
       /* The arrows are placed against the picture alone. Placed against the
          whole stage they slid down as rows were added under it, onto the
          video's own play button, and swallowed its clicks. */
-      wrap.innerHTML = `<div class="stage"><div class="shotwrap">${media}
+      wrap.innerHTML = `<div class="stage${this._ui.clip && e.clip ? ' clip' : ''}"><div class="shotwrap">${media}
         <button class="nav l" data-act="step" data-v="-1" aria-label="Newer" ${i === 0 ? 'disabled' : ''}>${svg('left')}</button>
         <button class="nav r" data-act="step" data-v="1" aria-label="Older" ${i >= list.length - 1 ? 'disabled' : ''}>${svg('right')}</button>
         <button class="x" data-act="close" aria-label="Close">${svg('close')}</button>

@@ -843,8 +843,12 @@ const shot = async (page, name) => {
   check(await page.evaluate(() => {
     const r = window.card.shadowRoot; r.querySelector('.stage [data-act="clip"]').click();   // the harness has no clip to serve, so look before it gives up
     const v = r.querySelector(".stage video");
+    const box = (el) => el.getBoundingClientRect(); const vb = box(v);
+    window.clear = [".x", ".pos"].every((k) => box(r.querySelector(`.stage ${k}`)).bottom <= vb.top + 0.5)
+      && [...r.querySelectorAll(".stage .nav")].every((n) => Math.abs(box(n).top + box(n).height / 2 - (vb.top + vb.height / 2)) < 4);
     return v?.loop === true && v.muted === false && !!r.querySelector('.stage [data-act="loop"][aria-pressed="true"]');
   }), "and to a sighting's video, which starts with its sound on");
+  check(await page.evaluate(() => window.clear), "over a video the close button and counter sit above the picture, clear of the browser's own controls");
   check(await page.evaluate(async () => {
     const c = window.card; c._ui.clip = true; c._stage();
     const v = c.shadowRoot.querySelector(".stage video"); v.muted = true;
