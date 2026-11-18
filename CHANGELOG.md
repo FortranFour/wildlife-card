@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.5.0-beta.6 — 2026-11-18
+
+- **A video's play and pause work again where a call is shown under it.** The previous and next arrows were placed against the whole stage, and the rows added under the picture pushed the left one down onto the video's own play button, where it swallowed the clicks, invisibly when it was disabled. The arrows are now placed against the picture alone.
+- **Clips start with their sound on.** If the browser will not allow that, the clip starts muted rather than not at all. Muting a video yourself is remembered for the next one.
+
 ## 1.5.0-beta.5 — 2026-11-18
 
 - **A playhead on the spectrogram.** A line crosses the spectrogram at the point being played, since the browser's own progress bar is inset and cannot line up with the picture. A click on the spectrogram plays from there.

@@ -842,8 +842,19 @@ const shot = async (page, name) => {
   await page.click$(".shot");
   check(await page.evaluate(() => {
     const r = window.card.shadowRoot; r.querySelector('.stage [data-act="clip"]').click();   // the harness has no clip to serve, so look before it gives up
-    return r.querySelector(".stage video")?.loop === true && !!r.querySelector('.stage [data-act="loop"][aria-pressed="true"]');
-  }), "and to a sighting's video");
+    const v = r.querySelector(".stage video");
+    return v?.loop === true && v.muted === false && !!r.querySelector('.stage [data-act="loop"][aria-pressed="true"]');
+  }), "and to a sighting's video, which starts with its sound on");
+  check(await page.evaluate(async () => {
+    const c = window.card; c._ui.clip = true; c._stage();
+    const v = c.shadowRoot.querySelector(".stage video"); v.muted = true;
+    await new Promise((r) => setTimeout(r, 150));
+    const kept = c._ui.vmuted === true;
+    c._stage();
+    const again = c.shadowRoot.querySelector(".stage video").muted === true;
+    const w = c.shadowRoot.querySelector(".stage video"); w._auto = true; w.muted = false; w.muted = true;   // a browser's doing, not the viewer's
+    return kept && again;
+  }), "a viewer who mutes a video finds the next one muted too");
   await page.close();
 
   /* a threshold of its own for what is heard */
@@ -869,10 +880,20 @@ const shot = async (page, name) => {
   await both.evaluate(() => { const c = window.card; c._ui.cur = window.plan.junco; c._stage(); });
   const strip = await both.evaluate(() => {
     const r = window.card.shadowRoot; const sg = r.querySelector(".stage .strip .sg"); const ref = r.querySelector(".stage .strip img.ref");
-    return { sg: !!sg?.querySelector("img.stripimg"), head: !!sg?.querySelector(".playhead"), ref: ref?.getAttribute("title"), pic: !!r.querySelector(".stage > img.media"), loop: !!r.querySelector('.stage [data-act="loop"]') };
+    return { sg: !!sg?.querySelector("img.stripimg"), head: !!sg?.querySelector(".playhead"), ref: ref?.getAttribute("title"), pic: !!r.querySelector(".stage .shotwrap > img.media"), loop: !!r.querySelector('.stage [data-act="loop"]') };
   });
   check(strip.sg && strip.head && strip.pic, "a paired sighting shows the call's spectrogram under the camera picture");
   check(strip.ref === "Dark-eyed Junco" && strip.loop, "with BirdNET-Go's picture of the species it named, and repeat");
+  const geo = await both.evaluate(() => {
+    const r = window.card.shadowRoot; const m = r.querySelector(".stage .shotwrap > .media").getBoundingClientRect();
+    const mid = (el) => { const q = el.getBoundingClientRect(); return q.top + q.height / 2; };
+    const navs = [...r.querySelectorAll(".stage .nav")];
+    /* where a video's own play button sits: bottom left of the picture */
+    const hit = r.elementFromPoint(m.left + 30, m.bottom - 24);
+    return { centred: navs.every((n) => Math.abs(mid(n) - (m.top + m.height / 2)) < 4), hit: hit?.className || hit?.tagName,
+      dead: navs.filter((n) => n.disabled).every((n) => getComputedStyle(n).pointerEvents === "none") };
+  });
+  check(geo.centred && /media/.test(geo.hit) && geo.dead, `the arrows sit on the picture's middle, clear of a video's own controls, however much is stacked under it (${geo.hit})`);
   const r = await both.evaluate(() => { const el = window.card.shadowRoot.querySelector(".stage .strip .sg"); el.scrollIntoView({ block: "center" }); const q = el.getBoundingClientRect(); return { x: q.left, y: q.top, w: q.width, h: q.height }; });
   await both.mouse.click(r.x + r.w * 0.5, r.y + r.h * 0.5);
   await both.waitForFunction(() => window.card.shadowRoot.querySelector(".stage audio").ended, null, { timeout: 5000 });

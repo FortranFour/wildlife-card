@@ -287,7 +287,7 @@
     .stage .media { display:block; width:100%; aspect-ratio:16/9; object-fit:contain; background:#000; }
     .stage .nav { position:absolute; top:calc(50% - 40px); width:36px; height:36px; border-radius:50%; display:grid; place-items:center; background:rgba(0,0,0,.5); color:#fff; }
     .stage .nav.l { left:8px; } .stage .nav.r { right:8px; }
-    .stage .nav:disabled { opacity:.25; cursor:default; }
+    .stage .nav:disabled { opacity:.25; cursor:default; pointer-events:none; }
     .stage .x { position:absolute; top:8px; right:8px; width:30px; height:30px; border-radius:50%; display:grid; place-items:center; background:rgba(0,0,0,.5); color:#fff; }
     .stage .pos { position:absolute; top:10px; left:10px; padding:2px 9px; border-radius:999px; font-size:11px; font-weight:700; background:rgba(0,0,0,.5); color:#fff; }
     .fail { display:grid; gap:8px; place-items:center; padding:26px 18px; text-align:center; background:rgba(var(--wl-ink),.04); }
@@ -322,7 +322,7 @@
     .tune label + input + label { margin-top:10px; }
     .stage .also { border-top:1px solid var(--divider-color,rgba(127,127,127,.3)); }
     .shotwrap { position:relative; background:#000; }
-    .shotwrap .nav { top:calc(50% - 18px); }
+    .stage .shotwrap .nav { top:calc(50% - 18px); }
     .stage .media.spec { aspect-ratio:2/1; object-fit:fill; }
     .stage .player { display:block; width:100%; height:40px; background:var(--card-background-color,#fff); }
     .stage .note { padding:8px 12px; font-size:12px; line-height:16px; color:var(--secondary-text-color); background:var(--card-background-color,#fff); }
@@ -381,7 +381,7 @@
         /* A camera's 70% and a microphone's are not the same claim, so what
            is heard keeps a threshold of its own. */
         hmin: Number.isFinite(saved.hmin) ? saved.hmin : Math.min(99, Math.max(50, +c.heard_min_score || +c.min_score || 70)),
-        loop: saved.loop === true,
+        loop: saved.loop === true, vmuted: saved.vmuted === true,
         sp: null, cell: null, tune: false, cur: null, clip: false, limit: 60,
         src: (saved.src === 'heard' || (saved.src === 'both' && c.correlate)) && (c.birdnet_url || c.birdnet_addon) ? saved.src : 'seen', allRows: false,
       };
@@ -415,7 +415,7 @@
     getGridOptions() { return { columns: 12, min_columns: 6 }; }
 
     _load() { try { return JSON.parse(localStorage.getItem('wildlife-card') || '{}'); } catch (e) { return {}; } }
-    _save() { try { localStorage.setItem('wildlife-card', JSON.stringify({ days: this._ui.days, view: this._ui.view, min: this._ui.min, hmin: this._ui.hmin, loop: this._ui.loop, src: this._ui.src })); } catch (e) { /* private mode */ } }
+    _save() { try { localStorage.setItem('wildlife-card', JSON.stringify({ days: this._ui.days, view: this._ui.view, min: this._ui.min, hmin: this._ui.hmin, loop: this._ui.loop, vmuted: this._ui.vmuted, src: this._ui.src })); } catch (e) { /* private mode */ } }
 
     _refresh(full) { this._fetch(full); if (this._bnOn()) this._fetchHeard(full); }
     _playing() { return [...(this._root?.querySelectorAll('video,audio') || [])].some((m) => !m.paused && !m.ended); }
@@ -1149,6 +1149,11 @@
         this._$(`.tune output[data-for="${name}"]`).textContent = `${this._ui[name]}%`;
         this._render(true);
       });
+      this._root.addEventListener('volumechange', (ev) => {
+        const v = ev.target; if (v.tagName !== 'VIDEO') return;
+        if (v._auto) { v._auto = false; return; }
+        if (this._ui.vmuted !== v.muted) { this._ui.vmuted = v.muted; this._save(); }
+      }, true);
       /* Media events do not bubble, but they can be caught on the way down. */
       for (const t of ['play', 'pause', 'ended', 'seeked', 'timeupdate', 'loadedmetadata']) {
         this._root.addEventListener(t, (ev) => { if (ev.target.tagName === 'AUDIO') this._playhead(ev.target, t); }, true);
@@ -1375,7 +1380,7 @@
       const away = this._signed(e);
       const pad = this._ui.clip && e.clip ? this._clipPaths(e) : null;
       const media = this._ui.clip && e.clip
-        ? `<video class="media" controls playsinline muted${this._ui.loop ? ' loop' : ''} preload="metadata" poster="${esc(still)}"${pad ? ` data-vod-hls="${esc(pad.hls)}" data-vod-mp4="${esc(pad.mp4)}"` : ''} data-hls="${esc(this._media(e.id, 'index.m3u8'))}" data-mp4="${esc(this._media(e.id, 'clip.mp4'))}"></video>`
+        ? `<video class="media" controls playsinline${this._ui.vmuted ? ' muted' : ''}${this._ui.loop ? ' loop' : ''} preload="metadata" poster="${esc(still)}"${pad ? ` data-vod-hls="${esc(pad.hls)}" data-vod-mp4="${esc(pad.mp4)}"` : ''} data-hls="${esc(this._media(e.id, 'index.m3u8'))}" data-mp4="${esc(this._media(e.id, 'clip.mp4'))}"></video>`
         : `<img class="media" alt="${esc(this._name(e))}" data-id="${esc(e.id)}" data-kind="${e.snap ? 'snapshot' : 'thumbnail'}" src="${esc(still)}">`;
       /* The call that goes with this sighting, when there is one. Its recording
          comes through the same ingress session as the rest of what is heard. */
@@ -1397,11 +1402,14 @@
       }
       const dur = e.end ? Math.max(1, Math.round(e.end - e.start)) : null;
       const meta = [pretty(e.cam), `${Math.round(e.score * 100)}%${e.inferred ? ' as dog' : ''}`, dur ? (dur >= 90 ? `${Math.round(dur / 60)} min` : `${dur}s`) : 'in progress', ...e.zones.slice(0, 2).map(pretty)];
-      wrap.innerHTML = `<div class="stage">${media}
+      /* The arrows are placed against the picture alone. Placed against the
+         whole stage they slid down as rows were added under it, onto the
+         video's own play button, and swallowed its clicks. */
+      wrap.innerHTML = `<div class="stage"><div class="shotwrap">${media}
         <button class="nav l" data-act="step" data-v="-1" aria-label="Newer" ${i === 0 ? 'disabled' : ''}>${svg('left')}</button>
         <button class="nav r" data-act="step" data-v="1" aria-label="Older" ${i >= list.length - 1 ? 'disabled' : ''}>${svg('right')}</button>
         <button class="x" data-act="close" aria-label="Close">${svg('close')}</button>
-        <span class="pos">${i + 1} / ${list.length}</span>${also}
+        <span class="pos">${i + 1} / ${list.length}</span></div>${also}
         <div class="cap"><div class="t"><div class="p">${esc(this._name(e))}</div><div class="s">${esc([this._when(e.start), ...meta].join(' · '))}</div></div>
           ${e.clip ? (this._ui.clip ? `<button class="pill" data-act="still">${svg('image')}Photo</button>` : `<button class="pill" data-act="clip">${svg('play')}Video</button>`) : ''}
           ${(this._ui.clip && e.clip) || (m && m.clip) ? this._repeat() : ''}
@@ -1481,14 +1489,26 @@
         if (!data.fatal) return;
         hls.destroy(); v._hls = null; v.dataset[failFlag] = '1'; this._attachMedia(v);
       });
-      hls.on(Hls.Events.MANIFEST_PARSED, () => v.play().catch(() => {}));
+      hls.on(Hls.Events.MANIFEST_PARSED, () => this._start(v));
       hls.loadSource(url);
       hls.attachMedia(v);
       return true;
     }
 
+    /* A clip starts with its sound. By the time it is ready the tap that asked
+       for it may be too far back for a browser to allow that, and then it
+       starts muted rather than not at all; that is not the viewer's choice,
+       so it is not remembered as one. */
+    _start(v) {
+      return v.play().catch(() => {
+        if (v.muted) return undefined;
+        v._auto = true; v.muted = true;
+        return v.play().catch(() => {});
+      });
+    }
+
     async _attachMedia(v) {
-      const play = () => v.play().catch(() => {});
+      const play = () => this._start(v);
       if (v.dataset.vodHls && !v.dataset.noVodLib) {
         try {
           const signed = await this._signPath(v.dataset.vodHls);
