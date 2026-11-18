@@ -10,6 +10,8 @@
   Query string: ?w=430 card width · ?dark=1 dark theme · ?seed=7 data seed
                 ?quiet=1 no coyote pack in the data · ?hls=1 claim native HLS
                 ?nosun=1 no latitude, so no day/night shading
+                ?heard=1 a BirdNET-Go to listen to (set birdnet_url or birdnet_addon in ?config)
+                ?bnfail=503 that BirdNET-Go answers every request with this status
 -->
 <html lang="en">
 <head>
@@ -115,6 +117,81 @@ if (q.get('mode') === 'speciesnet') {
 }
 events.sort((a, b) => b.start_time - a.start_time);
 
+/* ---- what BirdNET-Go heard ------------------------------------------------
+   Rows shaped as its /api/v2/detections returns them. A dawn-weighted chorus,
+   an owl after dark, a thrush that only turned up this week, a coyote the
+   night before last, and the classes that are not animals at all. */
+const heardRows = []; let hn = 1000;
+const hear = (common, sci, ago, conf, src = 'Backyard', extra = {}) => {
+  if (ago < 0) return;                        // later today has not happened yet
+  const t = new Date((now - ago) * 1000);
+  heardRows.push({
+    id: hn++, date: t.toLocaleDateString('en-CA'), time: t.toTimeString().slice(0, 8), timestamp: t.toISOString(),
+    scientificName: sci, commonName: common, confidence: conf, clipName: ago < 20 * 86400 ? `clips/${hn}.wav` : '',
+    verified: 'unverified', locked: false, source: { id: `rtsp_${src.toLowerCase()}`, type: 'rtsp', displayName: src }, ...extra,
+  });
+};
+if (q.get('heard')) {
+  const CHORUS = [
+    ['Dark-eyed Junco', 'Junco hyemalis', 14], ['Black-capped Chickadee', 'Poecile atricapillus', 11],
+    ['American Robin', 'Turdus migratorius', 9], ['Song Sparrow', 'Melospiza melodia', 8],
+    ["Steller's Jay", 'Cyanocitta stelleri', 6], ['Northern Flicker', 'Colaptes auratus', 5],
+    ["Anna's Hummingbird", 'Calypte anna', 5], ['American Crow', 'Corvus brachyrhynchos', 5],
+    ['Spotted Towhee', 'Pipilo maculatus', 4], ["Bewick's Wren", 'Thryomanes bewickii', 4],
+    ['Red-breasted Nuthatch', 'Sitta canadensis', 3], ['Golden-crowned Kinglet', 'Regulus satrapa', 3],
+    ['Pine Siskin', 'Spinus pinus', 2], ['Bushtit', 'Psaltriparus minimus', 2],
+  ];
+  for (let d = 0; d < 30; d++) {
+    for (const [common, sci, weight] of CHORUS)
+      for (let i = 0; i < weight * (0.5 + rnd()); i++)
+        hear(common, sci, at(d, 6.2 + rnd() * rnd() * 11), 0.72 + rnd() * 0.27, rnd() > 0.35 ? 'Backyard' : 'Front');
+    if (d % 3 === 1) for (let i = 0; i < 2; i++) hear('Barred Owl', 'Strix varia', at(d, (22.5 + rnd() * 4) % 24), 0.8 + rnd() * 0.15);
+    if (d >= 1 && d <= 2) for (let i = 0; i < 4; i++) hear('Varied Thrush', 'Ixoreus naevius', at(d, 7 + rnd() * 2), 0.86, 'Backyard', { isNewSpecies: true });
+    hear('Engine', 'Engine', at(d, 8.5), 0.9, 'Front');
+    hear('Human vocal', 'Human vocal', at(d, 17.2), 0.88, 'Front');
+    hear('Dog', 'Dog', at(d, 16.4), 0.85, 'Front');
+    hear('Pacific Chorus Frog', 'Pseudacris regilla', at(d, 21.3), 0.83);
+  }
+  if (!q.get('quiet')) hear('Coyote', 'Canis latrans', at(1, 2.6), 0.91, 'Front');
+  hear('Song Sparrow', 'Melospiza melodia', at(2, 9), 0.95, 'Backyard', { verified: 'false_positive' });
+  heardRows.sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
+
+  const realFetch = window.fetch.bind(window);
+  window.bnCalls = [];
+  window.fetch = async (url, opts) => {
+    const u = new URL(String(url), location.href);
+    if (!u.pathname.endsWith('/api/v2/detections')) return realFetch(url, opts);
+    window.bnCalls.push({ url: String(url), credentials: opts?.credentials || '' });
+    if (q.get('bnfail')) return new Response('{"error":"nope"}', { status: +q.get('bnfail') });
+    const from = u.searchParams.get('start_date'); const to = u.searchParams.get('end_date');
+    const limit = Math.min(1000, +u.searchParams.get('numResults') || 100); const offset = +u.searchParams.get('offset') || 0;
+    const hit = heardRows.filter((r) => r.date >= from && r.date <= to);
+    return new Response(JSON.stringify({ data: hit.slice(offset, offset + limit), total: hit.length, limit, offset }),
+      { headers: { 'content-type': 'application/json' } });
+  };
+}
+window.heardRows = heardRows;
+
+/* Stand-ins for the pictures and the recording BirdNET-Go would serve. */
+const hue = (str) => [...str].reduce((a, c) => (a * 31 + c.charCodeAt(0)) % 360, 7);
+const speciesPic = (name) => 'data:image/svg+xml,' + encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 90 90"><rect width="90" height="90" fill="hsl(${hue(name)} 32% 62%)"/>
+     <g fill="hsl(${hue(name)} 38% 24%)"><ellipse cx="44" cy="52" rx="19" ry="13"/><circle cx="60" cy="40" r="8"/><path d="M67 39l9-2-8 6M27 50q-14 6-18 16l22-8"/></g></svg>`);
+const spectrogram = (id) => {
+  let x = id % 97; const next = () => (x = (x * 37 + 11) % 97) / 97; let bars = '';
+  for (let i = 0; i < 60; i++) { const y = 20 + next() * 50; bars += `<rect x="${i * 5}" y="${y}" width="4" height="${6 + next() * 26}" fill="hsl(${40 + next() * 20} 95% ${35 + next() * 40}%)" opacity="${0.35 + next() * 0.6}"/>`; }
+  return 'data:image/svg+xml,' + encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 150" preserveAspectRatio="none"><rect width="300" height="150" fill="#0b0720"/>${bars}</svg>`);
+};
+const silence = (() => {                      // a third of a second of nothing, as a WAV
+  const n = 2646; const b = new Uint8Array(44 + n); const v = new DataView(b.buffer);
+  const put = (o, t) => [...t].forEach((c, i) => { b[o + i] = c.charCodeAt(0); });
+  put(0, 'RIFF'); v.setUint32(4, 36 + n, true); put(8, 'WAVEfmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true);
+  v.setUint16(22, 1, true); v.setUint32(24, 8000, true); v.setUint32(28, 8000, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true);
+  put(36, 'data'); v.setUint32(40, n, true); b.fill(128, 44);
+  return 'data:audio/wav;base64,' + btoa(String.fromCharCode(...b));
+})();
+
 /* ---- placeholder stills (no real footage in this repo) ------------------- */
 const SHAPE = {
   rodent: '<ellipse cx="92" cy="62" rx="15" ry="8"/><circle cx="105" cy="57" r="6"/><path d="M78 62q-14 2-18 10" stroke="currentColor" stroke-width="3" fill="none"/>',
@@ -169,10 +246,11 @@ const hass = {
     if (msg.type === 'supervisor/ingress/info') {
       // ... and answers administrators only, as Home Assistant words it.
       if (new URLSearchParams(location.search).has('guest')) throw { code: 'unauthorized', message: 'Unauthorized' };
+      if (msg.slug === 'db21ed7f_birdnet-go') return { name: 'BirdNET-Go', slug: msg.slug, ingress_url: '/api/hassio_ingress/BIRDNET-TOKEN/' };
       if (msg.slug !== 'ccab4aaf_frigate-fa') throw new Error('Add-on not found');
       return { name: 'Frigate', slug: msg.slug, ingress_url: '/api/hassio_ingress/TOKEN-OF-THE-MOMENT/' };
     }
-    if (msg.type === 'supervisor/ingress/session') return { session: 'a-session' };
+    if (msg.type === 'supervisor/ingress/session') { window.sessions = (window.sessions || 0) + 1; return { session: 'a-session' }; }
     // Home Assistant signs a path so it can be opened outside the frontend.
     if (msg.type === 'auth/sign_path') return { path: `${msg.path}?authSig=SIGNED` };
     if (msg.type === 'frigate/events/summary') {
@@ -204,6 +282,15 @@ const Card = customElements.get('wildlife-card');
 Card.prototype._media = function (id, file) {
   const e = events.find((x) => x.id === id);
   return file === 'clip.mp4' || file.endsWith('.m3u8') ? 'about:blank' : still(e || { label: 'rodent', start_time: now });
+};
+// ... and for BirdNET-Go's, keeping the real addresses within reach of the checks.
+const realBn = Card.prototype._bnMedia;
+Card.prototype._bnReal = realBn;
+Card.prototype._bnMedia = function (kind, e) {
+  if (kind === 'species') return speciesPic(e.spName);
+  if (kind === 'spectrogram') return q.get('nospec') ? 'about:blank' : spectrogram(e.hid);
+  if (kind === 'audio') return silence;
+  return realBn.call(this, kind, e);
 };
 const el = document.createElement('wildlife-card');
 el.setConfig(JSON.parse(q.get('config') || '{}'));

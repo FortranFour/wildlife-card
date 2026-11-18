@@ -69,6 +69,7 @@ const shot = async (page, name) => {
   check(!!(await page.text$(".hl .p")), "headline has a top line");
   check((await page.$$c(".shot")).length > 5, "sightings filmstrip is populated");
   check((await page.$$c(".row")).length === 8, "activity grid has a row per species");
+  check(!(await page.$('wildlife-card [data-act="src"]')), "no Seen / Heard switch until a BirdNET-Go is configured");
   await shot(page, "overview-light.png");
 
   /* 2 — a species tile filters the grid and the browser */
@@ -472,6 +473,210 @@ const shot = async (page, name) => {
   check(out.autoNames.length === 2 && out.hasBird && !out.hasSpeech, "with it on, labels to leave out are offered from what Frigate saw, sounds excluded");
   check(!("species" in out.off) && !("ignore_labels" in out.off) && out.off.aliases?.a === "B", "turning it off removes the key and leaves the YAML-only options alone");
   check(out.customNames.length === 0 && Array.isArray(out.kept.species) && out.kept.title === "New", "a species list written in YAML is neither offered the switch nor disturbed");
+  await page.close();
+}
+
+/* 15 — what is heard: BirdNET-Go's detections behind a Seen / Heard switch */
+{
+  const BN = encodeURIComponent(JSON.stringify({ birdnet_url: "http://birdnet.local:8080/" }));
+  const page = await open(`&heard=1&config=${BN}`);
+  await page.waitForFunction("window.card._hLoaded === true");
+  check((await page.$$c('[data-act="src"]')).length === 2, "a configured BirdNET-Go adds the Seen / Heard switch");
+  check((await page.$$c(".tile")).length === 8 && (await page.$$c(".row")).length === 8, "and the card still opens on what was seen");
+  check((await page.text$(".hl .s")).includes("Coyote heard"), `a coyote that was heard reaches the seen headline (${(await page.text$(".hl .s")).slice(0, 60)}…)`);
+
+  await page.click$('[data-act="src"][data-v="heard"]');
+  const calls = await page.evaluate(() => window.bnCalls);
+  const expected = await page.evaluate(() => {
+    const first = window.card._days()[0].key;
+    return window.heardRows.filter((r) => r.date >= first && !/^(Engine|Human vocal|Dog)$/.test(r.commonName) && r.verified !== "false_positive").length;
+  });
+  const got = await page.evaluate(() => window.card._heard.size);
+  check(calls.length >= 2 && /offset=1000/.test(calls[1].url), `a busy fortnight is read a page at a time (${calls.length} requests)`);
+  check(calls[0].url.startsWith("http://birdnet.local:8080/api/v2/detections?start_date="), `from the address given, without its trailing slash (${calls[0].url.slice(0, 60)}…)`);
+  check(calls[0].credentials === "", "a plain address is sent no cookies");
+  check(got === expected && got > 1000, `every detection in range is kept, bar the ignored and the rejected (${got} of ${expected})`);
+
+  const names = await page.$$eval("wildlife-card .tile b", (els) => els.map((e) => e.textContent.trim()));
+  check(names.length === 8 && names[0] === "Dark-eyed Junco", `the tiles are the eight commonest voices (${names.slice(0, 3).join(", ")}…)`);
+  check(!names.some((n) => /Engine|Human|Dog/.test(n)), "engines, voices and dogs are not wildlife");
+  check((await page.$$c(".row")).length === 12, "the grid lists twelve species to begin with");
+  await page.click$('[data-act="allrows"]');
+  const rows = (await page.$$c(".row")).length;
+  check(rows > 12 && !(await page.$('wildlife-card [data-act="allrows"]')), `and the rest on request (${rows})`);
+  const head = await page.text$(".hl .p");
+  check(/Coyote heard/.test(head), `the heard headline leads with the coyote (${head})`);
+  check(/species, \d+ detections in 3 days/.test(await page.text$(".hl .s")), "and counts species and detections beneath it");
+  await shot(page, "heard-light.png");
+
+  /* a species picked from the grid, though it has no tile of its own */
+  await page.click$('.row .lab[data-row="barred_owl"]');
+  check((await page.text$(".chips .chip")).includes("Barred Owl"), "a species without a tile can still be chosen from the grid");
+  check((await page.$$eval("wildlife-card .tile b", (els) => els.map((e) => e.textContent.trim()))).includes("Barred Owl"), "and is given one while it is chosen");
+  await page.click$('[data-act="view"][data-v="hour"]');
+  check((await page.$$c(".row")).length === 12 && !!(await page.$("wildlife-card .grid.sky")), "time of day works for calls, shading and all");
+  const night = await page.$$eval("wildlife-card .rows .row", (rs) => rs.map((r) => +r.querySelector(".tot").textContent || 0));
+  check(night[11] + night[0] + night[1] > 0 && night.slice(3, 10).every((n) => n === 0), `the owl keeps to the dark hours (${night.join(" ")})`);
+
+  /* the stage: a spectrogram, the recording, and a way out to BirdNET-Go */
+  await page.click$(".shot");
+  check(!!(await page.$("wildlife-card .stage img.spec")), "a detection opens on its spectrogram");
+  check(!!(await page.$("wildlife-card .stage audio.player[controls]")), "with the recording under it");
+  check((await page.text$(".stage .p")).includes("Barred Owl") && (await page.text$(".stage .p")).includes("Strix varia"), "named in both languages");
+  const out = await page.evaluate(() => {
+    const c = window.card; const e = c._list.find((x) => x.id === c._ui.cur);
+    return {
+      link: c.shadowRoot.querySelector('.cap a[aria-label="Open this detection in BirdNET-Go"]')?.getAttribute("href"),
+      id: e.hid, sp: c._bnReal("species", e), spec: c._bnReal("spectrogram", e), audio: c._bnReal("audio", e),
+    };
+  });
+  check(out.link === `http://birdnet.local:8080/ui/detections/${out.id}`, `the link goes to that detection (${out.link})`);
+  check(out.sp === "http://birdnet.local:8080/api/v2/media/species-image?name=Strix%20varia"
+    && out.spec === `http://birdnet.local:8080/api/v2/spectrogram/${out.id}?size=md`
+    && out.audio === `http://birdnet.local:8080/api/v2/audio/${out.id}`, "pictures and recording are asked of BirdNET-Go's own API");
+  await page.click$('[data-act="step"][data-v="1"]');
+  check((await page.text$(".stage .pos")).startsWith("2 /"), "previous and next step through what was heard");
+  await shot(page, "heard-stage.png");
+
+  /* an old detection whose recording has been cleared away */
+  await page.click$('[data-act="days"][data-v="30"]');
+  await page.waitForFunction("window.card._hSpan === 30 && !window.card._hBusy");
+  check(await page.$eval("wildlife-card", (c) => c._ui.src === "heard"), "changing the range stays on what was heard");
+  const old = await page.evaluate(() => {
+    const c = window.card; const i = c._list.findIndex((e) => !e.clip);
+    c._ui.cur = c._list[i].id; c._stage();
+    return c.shadowRoot.querySelector(".stage .note")?.textContent || "";
+  });
+  check(/no longer keeps/.test(old) && !(await page.$("wildlife-card .stage audio")), "a detection whose recording is gone says so and offers no player");
+
+  /* the confidence filter and the way back */
+  await page.click$('[data-act="close"]');
+  await page.click$(".chips .chip");
+  await page.click$('[data-act="tune"]');
+  const before = await page.$eval("wildlife-card", (c) => c._all.length);
+  await page.$eval("wildlife-card input[name=min]", (i) => { i.value = 95; i.dispatchEvent(new Event("input", { bubbles: true, composed: true })); });
+  await page.waitForTimeout(250);
+  check((await page.$eval("wildlife-card", (c) => c._all.length)) < before && /detection/.test(await page.text$(".hid")), "the confidence filter applies to detections, and says detections");
+  await page.click$('[data-act="src"][data-v="seen"]');
+  check((await page.$$c(".tile")).length === 8 && /sighting/.test(await page.text$(".browser .sub h3")), "Seen puts the cameras back");
+  check(page.errors.length === 0, `the heard side runs without errors (${page.errors.slice(0, 2).join("; ")})`);
+  await page.close();
+}
+
+/* 16 — heard, wide and dark; labels left out; nothing heard at night without a coyote */
+{
+  const cfg = encodeURIComponent(JSON.stringify({ birdnet_url: "http://birdnet.local:8080", heard_ignore: ["Dark-eyed Junco", "pseudacris regilla"] }));
+  const page = await open(`&heard=1&quiet=1&dark=1&config=${cfg}`, 820);
+  await page.waitForFunction("window.card._hLoaded === true");
+  check(!(await page.text$(".hl .s")).includes("Coyote heard"), "no coyote heard, no mention of one");
+  await page.click$('[data-act="src"][data-v="heard"]');
+  const names = await page.$$eval("wildlife-card .tile b", (els) => els.map((e) => e.textContent.trim()));
+  check(!names.includes("Dark-eyed Junco") && names[0] === "Black-capped Chickadee", `heard_ignore leaves a species out by its common name (${names[0]} leads)`);
+  check(await page.$eval("wildlife-card", (c) => ![...c._heard.values()].some((e) => e.spName === "Pacific Chorus Frog")), "or by its scientific one");
+  const head = await page.text$(".hl .p");
+  check(/Varied Thrush heard for the first time in 14 days/.test(head), `a newcomer makes the headline (${head})`);
+  check(await page.$eval("wildlife-card", (c) => c._bnReal("spectrogram", { hid: 7 }).endsWith("?size=lg")), "a wide card asks for the larger spectrogram");
+  await page.click$('[data-act="view"][data-v="camera"]');
+  const labs = await page.$$eval("wildlife-card .row .lab", (els) => els.map((e) => e.textContent.trim()));
+  check(labs.join() === "Backyard,Front" && /by microphone/.test(await page.text$(".chart .sub h3")), `the location view is by microphone (${labs.join(", ")})`);
+  await shot(page, "heard-wide-dark.png");
+  check(page.errors.length === 0, `wide and dark, heard renders without errors (${page.errors.slice(0, 2).join("; ")})`);
+  await page.close();
+}
+
+/* 17 — BirdNET-Go as an add-on: through ingress, on a session, for those allowed in */
+{
+  const ADDON = encodeURIComponent(JSON.stringify({ birdnet_addon: "db21ed7f_birdnet-go" }));
+  const page = await open(`&heard=1&config=${ADDON}`);
+  await page.waitForFunction("window.card._hLoaded === true");
+  const calls = await page.evaluate(() => window.bnCalls);
+  check(calls[0].url.startsWith("/api/hassio_ingress/BIRDNET-TOKEN/api/v2/detections?"), `an add-on is read through its ingress address (${calls[0].url.slice(0, 52)}…)`);
+  check(calls[0].credentials === "same-origin" && (await page.evaluate(() => window.sessions)) >= 1, "on an ingress session, with the cookie sent");
+  await page.click$('[data-act="src"][data-v="heard"]');
+  await page.click$(".shot");
+  const link = await page.$eval('wildlife-card .cap a[aria-label="Open this detection in BirdNET-Go"]', (a) => a.getAttribute("href"));
+  check(/^\/api\/hassio_ingress\/BIRDNET-TOKEN\/ui\/detections\/\d+$/.test(link), `and its page opens through ingress too (${link})`);
+  /* a session left to age is renewed before a recording is opened */
+  const renewed = await page.evaluate(async () => {
+    const c = window.card; const was = window.sessions;
+    c._bn.at = Date.now() - 400000; c._stage();
+    const waiting = c.shadowRoot.querySelector(".stage .note")?.textContent || "";
+    await new Promise((r) => setTimeout(r, 300));
+    return { waiting, more: window.sessions > was, back: !!c.shadowRoot.querySelector(".stage img.spec") };
+  });
+  check(/Opening/.test(renewed.waiting) && renewed.more && renewed.back, "a stale session is renewed before a recording is opened");
+  await page.close();
+
+  /* someone who may not open the add-on gets the card as it was, and no complaint */
+  const guest = await open(`&heard=1&guest&config=${ADDON}`);
+  await guest.waitForFunction("window.card._hDenied === true");
+  check(!(await guest.$('wildlife-card [data-act="src"]')) && !(await guest.$("wildlife-card .err")), "a viewer who may not open BirdNET-Go gets no switch and no error");
+  check((await guest.$$c(".tile")).length === 8, "and the cameras' side is untouched");
+  await guest.close();
+
+  /* inside the Companion app the page link is left out; everything else stays */
+  const APP = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Home Assistant/2026.10 (io.robbie.HomeAssistant; build:2026.1; iOS 18.0)";
+  const app = await open(`&heard=1&config=${ADDON}`, 430, APP);
+  await app.waitForFunction("window.card._hLoaded === true");
+  await app.click$('[data-act="src"][data-v="heard"]');
+  await app.click$(".shot");
+  check(!!(await app.$("wildlife-card .stage audio.player")) && !(await app.$('wildlife-card .cap a[aria-label="Open this detection in BirdNET-Go"]')),
+    "in the Companion app the recording plays in the card and no ingress link is offered");
+  await app.close();
+}
+
+/* 18 — a BirdNET-Go that fails says so on its own side and leaves the other alone */
+{
+  const BN = encodeURIComponent(JSON.stringify({ birdnet_url: "http://birdnet.local:8080" }));
+  const page = await open(`&heard=1&bnfail=503&config=${BN}`);
+  await page.waitForFunction("!!window.card._hError");
+  check(!(await page.$("wildlife-card .err")) && (await page.$$c(".tile")).length === 8, "a failing BirdNET-Go does not disturb what was seen");
+  await page.click$('[data-act="src"][data-v="heard"]');
+  check(/Could not read BirdNET-Go \(BirdNET-Go answered 503\)/.test(await page.text$(".err")), "and explains itself on the heard side");
+  check((await page.$$c(".tile")).length === 0 && (await page.$$c('[data-act="src"]')).length === 2, "with the switch still there to go back");
+  await page.close();
+
+  const priv = await open(`&heard=1&bnfail=401&config=${BN}`);
+  await priv.waitForFunction("!!window.card._hError");
+  await priv.click$('[data-act="src"][data-v="heard"]');
+  check(/private mode/.test(await priv.text$(".err")), "a BirdNET-Go in private mode is named as such");
+  await priv.close();
+
+  const nospec = await open(`&heard=1&nospec=1&config=${BN}`);
+  nospec.ignore(/ERR_UNKNOWN_URL_SCHEME|about:blank|Failed to load/);
+  await nospec.waitForFunction("window.card._hLoaded === true");
+  await nospec.click$('[data-act="src"][data-v="heard"]');
+  await nospec.click$(".shot");
+  await nospec.waitForSelector("wildlife-card .stage .fail", { timeout: 5000 }).catch(() => {});
+  check(/No spectrogram/.test(await nospec.text$(".stage .fail").catch(() => "")) && !!(await nospec.$("wildlife-card .stage audio.player")), "a spectrogram that cannot be drawn says so, and the recording still plays");
+  await nospec.close();
+}
+
+/* 19 — the editor's BirdNET-Go fields */
+{
+  const page = await open();
+  const out = await page.evaluate(async () => {
+    const make = async (config) => {
+      const ed = customElements.get("wildlife-card").getConfigElement();
+      document.body.appendChild(ed);
+      ed.setConfig(config); ed.hass = window.hass;
+      await new Promise((r) => setTimeout(r, 300));
+      return ed;
+    };
+    const has = (ed, name) => JSON.stringify(ed.querySelector("ha-form").schema).includes(`"name":"${name}"`);
+    const fire = (ed, value) => new Promise((res) => {
+      ed.addEventListener("config-changed", (ev) => res(ev.detail.config), { once: true });
+      ed.querySelector("ha-form").dispatchEvent(new CustomEvent("value-changed", { detail: { value } }));
+    });
+    const plain = await make({ type: "custom:wildlife-card" });
+    const set = await fire(plain, { ...plain.querySelector("ha-form").data, birdnet_addon: "db21ed7f_birdnet-go" });
+    const withBn = await make({ type: "custom:wildlife-card", birdnet_addon: "db21ed7f_birdnet-go", heard_ignore: ["American Crow"] });
+    const cleared = await fire(withBn, { ...withBn.querySelector("ha-form").data, birdnet_addon: "", heard_ignore: [] });
+    return { offered: has(plain, "birdnet_addon") && has(plain, "birdnet_url"), early: has(plain, "heard_ignore"), later: has(withBn, "heard_ignore"), set, cleared };
+  });
+  check(out.offered && !out.early && out.later, "the editor offers the BirdNET-Go fields, and the labels to leave out once one is set");
+  check(out.set.birdnet_addon === "db21ed7f_birdnet-go" && !("heard_ignore" in out.set) && !("birdnet_url" in out.set), "setting the slug writes that key and no empty ones");
+  check(!("birdnet_addon" in out.cleared) && !("heard_ignore" in out.cleared), "and emptying the fields leaves no keys behind");
   await page.close();
 }
 

@@ -14,6 +14,7 @@ A Home Assistant dashboard card for the animals your [Frigate](https://frigate.v
 - **Species your way.** Eight built-in groups, your own list, or automatic discovery of whatever animals Frigate reports, classified sub-labels included.
 - **A confidence filter**, tucked behind the tune icon, to screen out the misclassifications every model produces.
 - **Coyotes without a coyote label.** Frigate+ does not detect coyotes yet, so the card can infer them: a dog on chosen cameras late at night with no person nearby, and two overlapping tracks flagged as a pack.
+- **What is heard as well as what is seen.** Point the card at [BirdNET-Go](https://github.com/tphakala/birdnet-go) and a Seen / Heard switch adds the bird and other animal calls it has identified, with the same tiles, grid and browser, a spectrogram and the recording for each one.
 - **No helper entities.** The card reads tracked objects straight from the Frigate integration over its websocket API. There is nothing to add to `configuration.yaml`.
 
 ## Requirements
@@ -79,6 +80,9 @@ Quote `start` and `end`. Unquoted, YAML reads `23:00` as a number and the night 
 | `frigate_url` | — | Same button for a Frigate that is not an add-on, e.g. `http://192.168.1.10:5000`. Used in preference to the slug. |
 | `clip_lead_in` | `0` | Extra seconds of recording before the sighting when playing a clip (`0` uses the event clip directly). |
 | `clip_lead_out` | `0` | Extra seconds of recording after the sighting when playing a clip (`0` uses the event clip directly). |
+| `birdnet_addon` | — | Add-on slug of a BirdNET-Go running as an add-on, e.g. `db21ed7f_birdnet-go`. Adds the Seen / Heard switch. See below. |
+| `birdnet_url` | — | The same for a BirdNET-Go that is not an add-on, e.g. `http://192.168.1.10:8080`. Used in preference to the slug. |
+| `heard_ignore` | `[]` | Heard labels to leave out, by common or scientific name. Engines, voices, sirens and the like, and dogs, are always left out. |
 | `coyote.enabled` | `true` | Infer coyotes from night-time dogs. See below. |
 | `coyote.cameras` | `[Driveway, Front]` | Cameras the inference looks at. |
 | `coyote.start` | `'23:00'` | Start of the night window. |
@@ -172,6 +176,35 @@ Two or more such tracks overlapping in time are flagged as a **pack**, which is 
 
 If the person lookup fails, the card infers nothing rather than guessing. Set `coyote.enabled: false` to switch the whole thing off, and if a model ever does detect `coyote`, those detections are picked up with no change needed.
 
+## Animals you hear
+
+Cameras miss most birds and everything that keeps to cover. [BirdNET-Go](https://github.com/tphakala/birdnet-go) listens instead: it runs the BirdNET model over a microphone or a camera's audio stream and logs each call it identifies, with a recording. Give the card its add-on slug or its address and a **Seen / Heard** switch appears under the headline:
+
+```yaml
+type: custom:wildlife-card
+birdnet_addon: db21ed7f_birdnet-go
+```
+
+The slug is the last part of the add-on's page address in Home Assistant. Both fields are in the visual editor.
+
+On the Heard side the card works as it does for sightings, on BirdNET-Go's detections:
+
+- **Tiles** for the eight most frequent callers, each with BirdNET-Go's picture of the species. A species it flags as new carries a *new* badge.
+- **The grid** by species (twelve to begin with, the rest on request), by time of day, or by microphone. The time-of-day view keeps its daylight shading, so the dawn chorus and whatever calls after dark are plain to see.
+- **The browser** opens a detection on its spectrogram with the recording under it, and a link to the same detection in BirdNET-Go.
+- **The headline** reports a species heard for the first time in the range, which callers are above or below their usual rate, the busiest two hours and what calls at night. It waits for six days of listening before it compares anything.
+- **The confidence filter** applies to detections too. BirdNET-Go has a threshold of its own, so nothing below that is there to show.
+
+BirdNET's model names coyotes. One heard in the last 48 hours leads the Heard headline and is noted on the Seen side as well, next to anything the cameras inferred.
+
+How it reaches BirdNET-Go, and what follows from that:
+
+- **As an add-on it is read through ingress**, on Home Assistant's own address, so it works over https and remotely with nothing to open or proxy. Ingress admits only those allowed to open the add-on, normally administrators. Anyone else, and a visitor to a dashboard published read-only, sees the card without the switch.
+- **A plain `birdnet_url` is read by the browser directly.** A dashboard served over https cannot read an `http://` address, and the card says so if that is what stops it. BirdNET-Go's private mode keeps the card out as well.
+- **The first load reads up to 20,000 detections**, newest first, and later refreshes only the latest. A very busy 30 days loses its oldest days, and the browser's heading says when that has happened.
+- **Recordings and spectrograms last as long as BirdNET-Go keeps them.** An older detection still counts in the grid and says its recording is gone.
+- **Inside the Companion apps** the recording plays in the card, but the link out to BirdNET-Go is left off for an add-on, for the same reason as the Frigate button.
+
 ## Day, night, dawn and dusk
 
 The time-of-day view is shaded for the light the camera was working in. It comes from the sun's altitude at your latitude, computed in the card rather than read from the `sun.sun` entity, which only knows about today — so **every column is tinted for its own date**, and over thirty days you can watch the nights draw in. Each two-hour cell is sampled every half hour and the colours blended, so a cell straddling sunrise comes out part night, part dawn. Dawn and dusk are identical as far as the sun is concerned, so they are told apart by whether the sun is on its way up.
@@ -211,8 +244,8 @@ npm run build        # esbuild → dist/ (the card, plus hls.js as a lazy chunk)
 node dev/test.mjs    # headless Chromium checks, screenshots in dev/out/
 ```
 
-`dev/harness.html` renders the built card against generated events, with no Home Assistant and no real footage, so the card can be run and tested without a camera. Open it directly by serving the repo root. The checks cover the species tiles, the filters, each grid mode, the sightings browser, the coyote inference, automatic discovery, clip padding and the visual editor; CI keeps the screenshots as an artifact.
+`dev/harness.html` renders the built card against generated events, with no Home Assistant and no real footage, so the card can be run and tested without a camera. Open it directly by serving the repo root. The checks cover the species tiles, the filters, each grid mode, the sightings browser, the coyote inference, automatic discovery, clip padding, the heard side against generated BirdNET-Go detections, and the visual editor; CI keeps the screenshots as an artifact.
 
 ## Credits
 
-Built for [Frigate](https://frigate.video) by Blake Blackshear and the [Frigate integration](https://github.com/blakeblackshear/frigate-hass-integration). Sub-label support, automatic species discovery and clip padding were contributed by [mgranberry](https://github.com/mgranberry). MIT licensed.
+Built for [Frigate](https://frigate.video) by Blake Blackshear and the [Frigate integration](https://github.com/blakeblackshear/frigate-hass-integration). The heard side reads [BirdNET-Go](https://github.com/tphakala/birdnet-go) by Tomi P. Hakala. Sub-label support, automatic species discovery and clip padding were contributed by [mgranberry](https://github.com/mgranberry). MIT licensed.

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.5.0 — unreleased
+
+- **Animals you hear.** With `birdnet_addon` or `birdnet_url` set, a Seen / Heard switch adds the bird and other animal calls identified by BirdNET-Go: tiles for the commonest callers, the grid by species, time of day or microphone, and a browser that opens each detection on its spectrogram with the recording under it. The headline reports newcomers, callers above or below their usual rate, the busiest hours and what calls after dark. Nothing changes for a card without either option.
+- **A coyote that is heard** leads the Heard headline and is noted on the Seen side, beside the cameras' own inference.
+- **`heard_ignore`** leaves heard labels out by common or scientific name. BirdNET's classes that are not animals (engines, voices, sirens and so on) and dogs are always left out.
+- **An add-on's BirdNET-Go is read through ingress**, so it needs no address of its own and works over https. Viewers who may not open the add-on get the card without the switch.
+- **A refresh no longer cuts off a clip or a recording that is playing.** The background refresh waits until it has finished.
+- Not yet run against a live BirdNET-Go: the checks use generated detections in the shape its API returns.
+
 ## 1.4.0 — 2026-11-15
 
 - **Automatic species discovery.** `species: auto` builds the tiles from whatever animals Frigate reports instead of a fixed list, promoting classified sub-labels (a bird classifier's species, SpeciesNet's taxonomy) to tiles of their own. `aliases` renames them, `glyphs` picks their emoji and `ignore_labels` leaves some out. Contributed by mgranberry.
