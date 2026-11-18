@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.5.0-beta.4 — 2026-11-18
+
+- **Leaving dogs out of discovery no longer switches off the coyote inference.** With species discovered automatically and `dog` in `ignore_labels`, dogs were dropped from the request to Frigate, so no night-time dog was ever weighed as a likely coyote. They are now asked for separately on the coyote cameras.
+
 ## 1.5.0-beta.3 — 2026-11-18
 
 - **"Discover species automatically" is always in the visual editor.** It used to be left out when a `species` list was written in YAML. Over a list it now sets `discover: true`, which makes the card discover species while the list stays in the YAML, and turning it off puts the list back in force. Without a list it writes `species: auto` as before.

@@ -541,13 +541,17 @@
           [wild, dogs] = await Promise.all([this._ws({ labels: [...wanted], after, limit: 10000 }), dogsP]);
         } else {
           const summary = await summaryP;
+          /* Dogs left out of discovery are left out of the request too, and the
+             coyote inference would then have nothing to go on, so they are
+             asked for on their own. */
+          const dogsLeftOut = Array.isArray(summary) && summary.some((x) => isDogLike(x.label, subOf(x)) && this._isIgnoredEvent(x.label, subOf(x)));
           if (Array.isArray(summary)) {
             const labels = [...new Set(summary.filter((x) => x.label && !this._audio.has(normKey(x.label)) && !this._isIgnoredEvent(x.label, subOf(x))).map((x) => x.label))];
             wild = labels.length ? await this._ws({ labels, after, limit: 10000 }) : [];
           } else {
             wild = await this._ws({ after, limit: 10000 });
           }
-          if (coy.enabled && wild.length >= 10000 && coy.cameras?.length) {
+          if (coy.enabled && (wild.length >= 10000 || dogsLeftOut) && coy.cameras?.length) {
             dogs = await this._ws({ labels: ['dog'], cameras: coy.cameras, after, limit: 3000 }).catch(() => []);
           }
         }

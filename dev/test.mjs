@@ -488,6 +488,10 @@ const shot = async (page, name) => {
     await p.close();
     return names;
   };
+  const withDogs = await tiles({ species: "auto" });
+  const noDogs = await tiles({ species: "auto", ignore_labels: ["dog"] });
+  check(withDogs.includes("coyote") && withDogs.includes("dog"), `under discovery a lone night-time dog becomes a coyote and the rest stay dogs (${withDogs.join(", ")})`);
+  check(noDogs.includes("coyote") && !noDogs.includes("dog"), `leaving dogs out does not switch the coyote inference off (${noDogs.join(", ")})`);
   const listed = [{ id: "bird", name: "Feathered", labels: ["bird"] }];
   const under = await tiles({ species: listed });
   const overTiles = await tiles({ species: listed, discover: true });
