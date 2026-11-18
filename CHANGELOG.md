@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.5.0 — unreleased
+## 1.5.0-beta.1 — 2026-11-17
 
 - **Animals you hear.** With `birdnet_addon` or `birdnet_url` set, a Seen / Heard switch adds the bird and other animal calls identified by BirdNET-Go: tiles for the commonest callers, the grid by species, time of day or microphone, and a browser that opens each detection on its spectrogram with the recording under it. The headline reports newcomers, callers above or below their usual rate, the busiest hours and what calls after dark. Nothing changes for a card without either option.
 - **A coyote that is heard** leads the Heard headline and is noted on the Seen side, beside the cameras' own inference.
