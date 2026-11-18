@@ -452,7 +452,7 @@ const shot = async (page, name) => {
       await new Promise((r) => setTimeout(r, 300));
       return ed;
     };
-    const names = (ed) => JSON.stringify(ed.querySelector("ha-form").schema).match(/"name":"(auto|ignore_labels)"/g) || [];
+    const names = (ed) => JSON.stringify(ed.querySelector("ha-form").schema).match(/"name":"(auto|auto_over|ignore_labels)"/g) || [];
     const fire = (ed, value) => new Promise((res) => {
       ed.addEventListener("config-changed", (ev) => res(ev.detail.config), { once: true });
       ed.querySelector("ha-form").dispatchEvent(new CustomEvent("value-changed", { detail: { value } }));
@@ -466,13 +466,33 @@ const shot = async (page, name) => {
     const opts = JSON.stringify(autoEd.querySelector("ha-form").schema);
     const custom = await make({ type: "custom:wildlife-card", species: [{ id: "x", name: "X", labels: ["bird"] }] });
     const kept = await fire(custom, { ...custom.querySelector("ha-form").data, title: "New" });
-    return { plain: names(plain), on, autoNames: names(autoEd), off, hasSpeech: /speech/i.test(opts), hasBird: /"bird"/.test(opts), customNames: names(custom), kept };
+    const over = await fire(custom, { ...custom.querySelector("ha-form").data, auto_over: true });
+    const overEd = await make(over);
+    const back = await fire(overEd, { ...overEd.querySelector("ha-form").data, auto_over: false, ignore_labels: [] });
+    return { plain: names(plain), on, autoNames: names(autoEd), off, hasSpeech: /speech/i.test(opts), hasBird: /"bird"/.test(opts), customNames: names(custom), kept,
+      over, overNames: names(overEd), overOn: overEd.querySelector("ha-form").data.auto_over, back };
   });
   check(out.plain.length === 1, "the editor offers the discovery switch on an ordinary card");
   check(out.on.species === "auto" && !("auto" in out.on), "turning it on writes species: auto and nothing else");
   check(out.autoNames.length === 2 && out.hasBird && !out.hasSpeech, "with it on, labels to leave out are offered from what Frigate saw, sounds excluded");
   check(!("species" in out.off) && !("ignore_labels" in out.off) && out.off.aliases?.a === "B", "turning it off removes the key and leaves the YAML-only options alone");
-  check(out.customNames.length === 0 && Array.isArray(out.kept.species) && out.kept.title === "New", "a species list written in YAML is neither offered the switch nor disturbed");
+  check(out.customNames.join() === '"name":"auto_over"' && Array.isArray(out.kept.species) && out.kept.title === "New" && !("discover" in out.kept) && !("auto_over" in out.kept),
+    "a species list written in YAML is offered the switch too, and an unrelated edit leaves it alone");
+  check(out.over.discover === true && out.over.species?.[0]?.id === "x" && !("auto_over" in out.over), "turning it on over a list sets discover and keeps the list");
+  check(out.overOn === true && out.overNames.length === 2, "the switch then shows on, with the labels to leave out");
+  check(!("discover" in out.back) && out.back.species?.[0]?.id === "x", "and turning it off puts the list back in force, untouched");
+  const tiles = async (cfg) => {
+    const p = await open("&config=" + encodeURIComponent(JSON.stringify(cfg)));
+    await p.waitForSelector("wildlife-card .tile");
+    const names = await p.$$eval("wildlife-card .tile b", (els) => els.map((e) => e.textContent.trim().toLowerCase()));
+    await p.close();
+    return names;
+  };
+  const listed = [{ id: "bird", name: "Feathered", labels: ["bird"] }];
+  const under = await tiles({ species: listed });
+  const overTiles = await tiles({ species: listed, discover: true });
+  check(under.join() === "feathered" && overTiles.length > 2 && !overTiles.includes("feathered") && overTiles.includes("rabbit"),
+    `discover overrides a written list on the card itself (${overTiles.slice(0, 4).join(", ")}…)`);
   await page.close();
 }
 

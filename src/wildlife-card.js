@@ -37,6 +37,7 @@
  *     end: '05:00'
  *     person_window: 120          # seconds either side to look for a person
  *   species:                      # omit for the built-in list, set 'auto' for dynamic discovery, or list custom groups
+ *   discover: false               # true: discover species even though a list is written out, and keep the list
  *     - { id: rodent, name: Rodents, labels: [rodent], glyph: 🐀 }
  */
 (() => {
@@ -328,7 +329,9 @@
     setConfig(config) {
       const c = config || {};
       const coy = c.coyote || {};
-      const auto = c.species === 'auto';
+      /* discover: true asks for discovery over a species list that stays
+         written in the YAML, so the list is there again when it is turned off. */
+      const auto = c.species === 'auto' || c.discover === true;
       const custom = !auto && Array.isArray(c.species) && c.species.length > 0;
       const list = auto ? null : (custom ? c.species : DEFAULT_SPECIES);
       this._cfg = {
@@ -1534,6 +1537,7 @@
     sun_shading: ['Day/night shading', 'Shade the time-of-day rows for daylight, darkness, dawn and dusk.'],
     indoor_cameras: ['Indoor cameras', 'A rodent on these is an alert rather than a sighting.'],
     auto: ['Discover species automatically', 'Build the tiles from whatever animals Frigate reports, sub-labels included, instead of the built-in groups. People, vehicles and sounds are left out.'],
+    auto_over: ['Discover species automatically', 'Build the tiles from whatever animals Frigate reports, sub-labels included, in place of the species list written in YAML. The list is kept and comes back when this is turned off.'],
     ignore_labels: ['Labels to leave out', 'Anything else discovery should skip, e.g. dog.'],
     instance_id: ['Frigate instance', 'Its MQTT client id. Only matters with more than one Frigate.'],
     frigate_addon: ['Frigate add-on', 'Its slug, for a Frigate running as an add-on. Adds a button that opens the sighting in Frigate.'],
@@ -1559,13 +1563,14 @@
     coyote: { enabled: true, cameras: ['Driveway', 'Front'], start: '23:00', end: '05:00', person_window: 120 },
   };
 
-  const schema = (cameras, labels = [], species, birdnet = false) => {
+  const schema = (cameras, labels = [], species, birdnet = false, auto = species === 'auto') => {
     const pick = { select: { multiple: true, custom_value: true, mode: 'dropdown', options: cameras } };
-    /* A species list written out in YAML is the user's own work; the switch
-       is only offered where turning it would not throw one away. */
-    const discovery = Array.isArray(species) ? [] : [
-      { name: 'auto', selector: { boolean: {} } },
-      ...(species === 'auto' ? [{ name: 'ignore_labels', selector: { select: { multiple: true, custom_value: true, mode: 'dropdown', options: labels } } }] : []),
+    /* A species list written out in YAML is the user's own work, so the
+       switch never throws one away: over a list it sets discover, which the
+       card obeys while the list stays where it is. */
+    const discovery = [
+      { name: Array.isArray(species) ? 'auto_over' : 'auto', selector: { boolean: {} } },
+      ...(auto ? [{ name: 'ignore_labels', selector: { select: { multiple: true, custom_value: true, mode: 'dropdown', options: labels } } }] : []),
     ];
     return [
       { name: 'title', selector: { text: {} } },
@@ -1655,7 +1660,8 @@
         ...DEFAULTS, ...c,
         days: String(c.days ?? DEFAULTS.days),
         coyote: { ...DEFAULTS.coyote, ...(c.coyote || {}) },
-        auto: c.species === 'auto',
+        auto: c.species === 'auto' || c.discover === true,
+        auto_over: c.species === 'auto' || c.discover === true,
         ignore_labels: Array.isArray(c.ignore_labels) ? c.ignore_labels : [],
         heard_ignore: Array.isArray(c.heard_ignore) ? c.heard_ignore : [],
         correlate: !!c.correlate,
@@ -1670,12 +1676,16 @@
         days: +v.days,
         coyote: { ...v.coyote, start: clock(v.coyote?.start), end: clock(v.coyote?.end) },
       };
-      /* The switch is the form's way of writing species: auto. Turning it off
-         removes the key, which restores the built-in groups; a list written
-         in YAML never reaches here, because the switch is not offered. */
-      if (!Array.isArray(this._config?.species)) {
+      /* Without a list of the user's own, the switch writes species: auto and
+         turning it off removes the key, which restores the built-in groups.
+         Over a written list it sets discover and leaves the list alone. */
+      if (Array.isArray(this._config?.species)) {
+        if (v.auto_over) config.discover = true; else delete config.discover;
+      } else {
         if (v.auto) config.species = 'auto'; else delete config.species;
+        delete config.discover;
       }
+      delete config.auto_over;
       delete config.auto;
       if (!Array.isArray(config.ignore_labels) || !config.ignore_labels.length) delete config.ignore_labels;
       if (!Array.isArray(config.heard_ignore) || !config.heard_ignore.length) delete config.heard_ignore;
@@ -1693,7 +1703,7 @@
       if (!this._form) {
         const note = document.createElement('ha-alert');
         note.setAttribute('alert-type', 'info');
-        note.textContent = 'Custom species groups, display-name aliases and tile glyphs are edited in YAML. Anything set there is kept when you switch.';
+        note.textContent = 'Custom species groups, display-name aliases and tile glyphs are edited in YAML. Anything set there is kept when you switch, and a species list is kept while discovery is on.';
         note.style.display = 'block';
         note.style.marginBottom = '12px';
         this.appendChild(note);
@@ -1702,7 +1712,8 @@
         this.appendChild(this._form);
       }
       this._form.hass = this._hass;
-      this._form.schema = schema(this._cameras || [], this._labels || [], this._config.species, !!(this._config.birdnet_addon || this._config.birdnet_url));
+      this._form.schema = schema(this._cameras || [], this._labels || [], this._config.species, !!(this._config.birdnet_addon || this._config.birdnet_url),
+        this._config.species === 'auto' || this._config.discover === true);
       this._form.data = this._data();
       this._form.computeLabel = (s) => FIELDS[s.name]?.[0] || pretty(s.name);
       this._form.computeHelper = (s) => FIELDS[s.name]?.[1] || '';

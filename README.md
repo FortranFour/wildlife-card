@@ -83,6 +83,7 @@ Quote `start` and `end`. Unquoted, YAML reads `23:00` as a number and the night 
 | `birdnet_addon` | — | Add-on slug of a BirdNET-Go running as an add-on, e.g. `db21ed7f_birdnet-go`. Adds the Seen / Heard switch. See below. |
 | `birdnet_url` | — | The same for a BirdNET-Go that is not an add-on, e.g. `http://192.168.1.10:8080`. Used in preference to the slug. |
 | `heard_ignore` | `[]` | Heard labels to leave out, by common or scientific name. Engines, voices, sirens and the like, and dogs, are always left out. |
+| `discover` | `false` | `true` discovers species automatically even though a `species` list is written out. The list stays in the YAML and takes over again when this is turned off. The visual editor's "Discover species automatically" switch sets it. |
 | `correlate` | `false` | Pair each sighting with a call of the same kind of animal, from the microphone named as its camera, at the same time. Adds **Both** to the switch. See below. |
 | `correlate_window` | `120` | Seconds before a sighting begins, or after it ends, that a call may fall and still count. |
 | `coyote.enabled` | `true` | Infer coyotes from night-time dogs. See below. |

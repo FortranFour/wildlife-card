@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.5.0-beta.3 — 2026-11-18
+
+- **"Discover species automatically" is always in the visual editor.** It used to be left out when a `species` list was written in YAML. Over a list it now sets `discover: true`, which makes the card discover species while the list stays in the YAML, and turning it off puts the list back in force. Without a list it writes `species: auto` as before.
+
 ## 1.5.0-beta.2 — 2026-11-18
 
 - **Seen and heard together.** With `correlate: true`, a sighting is paired with a call of the same kind of animal, from the microphone that has its camera's name, within `correlate_window` seconds (120 unless set). The switch gains **Both**, which shows only paired sightings, names what was heard on each, and plays the recording under the picture. Paired sightings are marked on the Seen side, and a call that was also seen says so on the Heard side. Both options are in the visual editor.
