@@ -83,6 +83,8 @@ Quote `start` and `end`. Unquoted, YAML reads `23:00` as a number and the night 
 | `birdnet_addon` | — | Add-on slug of a BirdNET-Go running as an add-on, e.g. `db21ed7f_birdnet-go`. Adds the Seen / Heard switch. See below. |
 | `birdnet_url` | — | The same for a BirdNET-Go that is not an add-on, e.g. `http://192.168.1.10:8080`. Used in preference to the slug. |
 | `heard_ignore` | `[]` | Heard labels to leave out, by common or scientific name. Engines, voices, sirens and the like, and dogs, are always left out. |
+| `correlate` | `false` | Pair each sighting with a call of the same kind of animal, from the microphone named as its camera, at the same time. Adds **Both** to the switch. See below. |
+| `correlate_window` | `120` | Seconds before a sighting begins, or after it ends, that a call may fall and still count. |
 | `coyote.enabled` | `true` | Infer coyotes from night-time dogs. See below. |
 | `coyote.cameras` | `[Driveway, Front]` | Cameras the inference looks at. |
 | `coyote.start` | `'23:00'` | Start of the night window. |
@@ -196,6 +198,20 @@ On the Heard side the card works as it does for sightings, on BirdNET-Go's detec
 - **The confidence filter** applies to detections too. BirdNET-Go has a threshold of its own, so nothing below that is there to show.
 
 BirdNET's model names coyotes. One heard in the last 48 hours leads the Heard headline and is noted on the Seen side as well, next to anything the cameras inferred.
+
+### Seen and heard together
+
+With `correlate: true` the card pairs sightings with calls, and the switch gains a third position, **Both**, that shows only the sightings that were also heard. A pair needs three things to agree:
+
+- **The animal.** A camera usually knows only "bird" where the microphone names the species, so a bird on camera pairs with any bird call, a squirrel with any squirrel, and a coyote (labelled or inferred) with a coyote. When the sighting carries a species of its own, as a sub-label, the call has to be that species.
+- **The place.** The microphone's name in BirdNET-Go has to be its camera's name in Frigate. Capitals and underscores do not matter: `front_door` matches "Front Door".
+- **The time.** The call falls between `correlate_window` seconds before the sighting begins and the same after it ends.
+
+When several calls qualify, the same species wins over the same kind, and then the most confident. A call under the card's confidence filter makes no pair.
+
+On **Both**, each shot names what was heard, and opening one puts the recording under the picture with how the two were timed ("Heard 40 s before"). The same line and player appear on the Seen side, where paired sightings carry a ♪ mark, and a call that was also seen says so on the Heard side.
+
+A pair is evidence, not proof: with a busy dawn chorus and a wide window, a bird in view and a different bird calling nearby will pair by chance. Narrow the window to tighten it.
 
 How it reaches BirdNET-Go, and what follows from that:
 

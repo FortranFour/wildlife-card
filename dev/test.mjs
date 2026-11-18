@@ -482,6 +482,7 @@ const shot = async (page, name) => {
   const page = await open(`&heard=1&config=${BN}`);
   await page.waitForFunction("window.card._hLoaded === true");
   check((await page.$$c('[data-act="src"]')).length === 2, "a configured BirdNET-Go adds the Seen / Heard switch");
+  check(!(await page.$("wildlife-card .shot .hd")), "and pairs nothing until asked to");
   check((await page.$$c(".tile")).length === 8 && (await page.$$c(".row")).length === 8, "and the card still opens on what was seen");
   check((await page.text$(".hl .s")).includes("Coyote heard"), `a coyote that was heard reaches the seen headline (${(await page.text$(".hl .s")).slice(0, 60)}…)`);
 
@@ -678,6 +679,101 @@ const shot = async (page, name) => {
   check(out.set.birdnet_addon === "db21ed7f_birdnet-go" && !("heard_ignore" in out.set) && !("birdnet_url" in out.set), "setting the slug writes that key and no empty ones");
   check(!("birdnet_addon" in out.cleared) && !("heard_ignore" in out.cleared), "and emptying the fields leaves no keys behind");
   await page.close();
+}
+
+/* 20 — seen and heard together: the same animal, the same place, the same time */
+{
+  const cfg = (extra = {}) => encodeURIComponent(JSON.stringify({ birdnet_url: "http://birdnet.local:8080", correlate: true, ...extra }));
+  const page = await open(`&heard=pairs&config=${cfg()}`);
+  await page.waitForFunction("window.card._hLoaded === true && window.card._loaded === true");
+  check((await page.$$c('[data-act="src"]')).length === 3, "correlate adds Both to the switch");
+  const pairs = await page.evaluate(() => {
+    const c = window.card; const out = {};
+    for (const [k, id] of Object.entries(window.plan)) { const m = c._match(c._events.get(id)); out[k] = m ? m.spName : null; }
+    return out;
+  });
+  check(pairs.plain === "American Robin", `a bird on camera pairs with the surest bird call there (${pairs.plain})`);
+  check(pairs.junco === "Dark-eyed Junco", `a sighting that names its species prefers that species over a surer call (${pairs.junco})`);
+  check(pairs.other === null, "and pairs with no other species");
+  check(pairs.porch === "American Crow", "a call shortly before the sighting counts, and a camera's underscores match the microphone's spaces");
+  check(pairs.away === null, "a call from another microphone does not");
+  check(pairs.late === null, "nor one that comes too long after");
+  check(pairs.cat === null, "a cat is not paired with birdsong");
+  check(pairs.coyote === "Coyote", "a likely coyote on camera pairs with a coyote that was heard");
+  check(pairs.squirrel === "Douglas Squirrel", "a squirrel pairs with a squirrel, whatever the microphone calls it");
+
+  await page.click$('.tile[data-v="squirrel"]');
+  check((await page.$$c(".shot .hd")).length === 1, "a paired sighting is marked on the Seen side");
+  await page.evaluate(() => { const c = window.card; c._ui.cur = window.plan.squirrel; c._stage(); });
+  check(/Heard while in view: Douglas Squirrel/.test(await page.text$(".stage .also .note")), "and opens with its call under the picture there too");
+  await page.click$('[data-act="close"]');
+  await page.click$(".chips .chip");
+  await page.click$('[data-act="src"][data-v="both"]');
+  const list = await page.evaluate(() => window.card._all.map((e) => e.id));
+  const want = await page.evaluate(() => ["plain", "junco", "porch", "coyote", "squirrel"].map((k) => window.plan[k]));
+  check(list.length === 5 && want.every((id) => list.includes(id)), `Both lists the paired sightings and nothing else (${list.length})`);
+  check(/5 sightings were also heard/.test(await page.text$(".hl .p")) && /within 2 min/.test(await page.text$(".hl .s")), `the headline counts them (${await page.text$(".hl .p")})`);
+  check(/5 matches/.test(await page.text$(".browser .sub h3")) && /Seen and heard per day/.test(await page.text$(".chart .sub h3")), "the browser and grid speak of matches");
+  const under = await page.$$eval("wildlife-card .shot i", (els) => els.map((e) => e.textContent.trim()));
+  check(under.some((t) => t.startsWith("Dark-eyed Junco · Front")), `each shot names what was heard and where (${under[0]})`);
+  await page.evaluate(() => { const c = window.card; c._ui.cur = window.plan.porch; c._stage(); });
+  const also = await page.text$(".stage .also .note");
+  check(/Heard 40 s before: American Crow · 88% · Garage porch microphone/.test(also), `the stage says what was heard and when (${also})`);
+  check(!!(await page.$("wildlife-card .stage .also audio.player")) && !!(await page.$("wildlife-card .stage img.media")), "with the recording under the picture");
+  await shot(page, "both-stage.png");
+
+  /* the confidence filter can rule the better call out, and the pair with it */
+  await page.click$('[data-act="close"]');
+  await page.click$('[data-act="tune"]');
+  await page.$eval("wildlife-card input[name=min]", (i) => { i.value = 87; i.dispatchEvent(new Event("input", { bubbles: true, composed: true })); });
+  await page.waitForTimeout(250);
+  const strict = await page.evaluate(() => {
+    const c = window.card; const m = (k) => { const e = c._events.get(window.plan[k]); const h = c._match(e); return h ? h.spName : null; };
+    return { junco: m("junco"), squirrel: m("squirrel") };
+  });
+  check(strict.junco === null && strict.squirrel === null, "a call under the confidence filter no longer makes a pair");
+
+  /* the heard side knows it was seen */
+  await page.$eval("wildlife-card input[name=min]", (i) => { i.value = 70; i.dispatchEvent(new Event("input", { bubbles: true, composed: true })); });
+  await page.waitForTimeout(250);
+  await page.click$('[data-act="src"][data-v="heard"]');
+  await page.evaluate(() => { const c = window.card; c._ui.cur = c._list.find((e) => e.spName === "Coyote").id; c._stage(); });
+  check(/seen on camera too/.test(await page.text$(".stage .cap .s")), "a call that was also seen says so on the Heard side");
+  check(page.errors.length === 0, `pairing runs without errors (${page.errors.slice(0, 2).join("; ")})`);
+  await page.close();
+
+  /* a narrower window, and nothing to pair */
+  const tight = await open(`&heard=pairs&config=${cfg({ correlate_window: 20 })}`);
+  await tight.waitForFunction("window.card._hLoaded === true && window.card._loaded === true");
+  check(await tight.evaluate(() => { const c = window.card; return c._match(c._events.get(window.plan.porch)) === null && !!c._match(c._events.get(window.plan.plain)); }),
+    "correlate_window narrows what counts as the same time");
+  await tight.close();
+  const none = await open(`&heard=pairs&config=${cfg({ heard_ignore: ["American Robin", "Song Sparrow", "Dark-eyed Junco", "American Crow", "Coyote", "Douglas Squirrel"] })}`);
+  await none.waitForFunction("window.card._hLoaded === true && window.card._loaded === true");
+  await none.click$('[data-act="src"][data-v="both"]');
+  check(/Nothing seen and heard together/.test(await none.text$(".hl .p")) && /No matches match|No matches/.test(await none.text$(".browser .empty")), "with nothing paired, Both says so plainly");
+  await none.close();
+
+  /* the editor */
+  const ed = await open();
+  const out = await ed.evaluate(async () => {
+    const e = customElements.get("wildlife-card").getConfigElement();
+    document.body.appendChild(e);
+    e.setConfig({ type: "custom:wildlife-card", birdnet_addon: "db21ed7f_birdnet-go" }); e.hass = window.hass;
+    await new Promise((r) => setTimeout(r, 300));
+    const form = e.querySelector("ha-form");
+    const fire = (value) => new Promise((res) => {
+      e.addEventListener("config-changed", (ev) => res(ev.detail.config), { once: true });
+      form.dispatchEvent(new CustomEvent("value-changed", { detail: { value } }));
+    });
+    const offered = JSON.stringify(form.schema).includes('"name":"correlate"');
+    const on = await fire({ ...form.data, correlate: true, correlate_window: 60 });
+    const off = await fire({ ...form.data, correlate: false });
+    return { offered, on, off };
+  });
+  check(out.offered && out.on.correlate === true && out.on.correlate_window === 60, "the editor offers the pairing and its window");
+  check(!("correlate" in out.off) && !("correlate_window" in out.off), "and leaves no keys behind when it is off");
+  await ed.close();
 }
 
 await browser.close();

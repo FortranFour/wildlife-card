@@ -28,6 +28,8 @@
  *   birdnet_addon: ''             # BirdNET-Go add-on slug: adds what the microphones hear
  *   birdnet_url: ''               # or its address, for a BirdNET-Go that is not an add-on
  *   heard_ignore: []              # heard labels to leave out, besides engines, voices and the like
+ *   correlate: false              # pair sightings with calls of the same animal, place and time
+ *   correlate_window: 120         # seconds either side of a sighting that still count as the same time
  *   coyote:
  *     enabled: true
  *     cameras: [Driveway, Front]  # where a lone night-time dog counts
@@ -145,6 +147,30 @@
     for (const [re, g] of GLYPH_RULES) if (re.test(hay)) return g;
     return '🐾';
   };
+  /* Whether a sighting and a call can be the same animal. A camera usually
+     knows only "bird" where the microphone names the species, so the test is
+     on the kind of animal unless the sighting carries a species of its own,
+     in which case the two have to agree. 2 is the same species, 1 the same
+     kind, 0 neither. */
+  const BIRD_GLYPHS = new Set(['🐦', '🦉', '🦅', '🦆', '🦃', '🐓', '🦩', '🕊️', '🦜']);
+  const kindOf = (name, raw, heard) => {
+    const g = glyphFor(name, raw);
+    return BIRD_GLYPHS.has(g) ? '🐦' : g === '🐾' ? (heard ? '🐦' : '') : g;
+  };
+  const sameKind = (e, h) => {
+    const hn = slugId(h.spName); const hs = h.sci ? slugId(h.sci) : '';
+    const within = (a, b) => `_${b}_`.includes(`_${a}_`);
+    const sub = e.sub && !e.inferred && !EMPTY_SUB.has(normKey(e.sub)) ? slugId(e.sub) : '';
+    if (sub) {
+      if (sub === hn || sub === hs || within(sub, hn) || within(hn, sub)) return 2;
+      if (kindOf(e.sub, '', false)) return 0;          // a species of its own, and a different one
+    }
+    const lab = slugId(e.label);
+    if (!e.inferred && (lab === hn || lab === hs)) return 2;
+    const seen = e.inferred || e.sp === 'coyote' ? '🐺' : kindOf(e.label, '', false);
+    return seen && seen === kindOf(h.spName, h.sci, true) ? 1 : 0;
+  };
+  const span = (sec) => (sec < 90 ? `${Math.round(sec)} s` : `${Math.round(sec / 60)} min`);
   const isDogLike = (label, sub) => {
     const l = normKey(label); const s = normKey(sub);
     return l === 'dog' || s === 'dog' || s === 'domestic dog' || s === 'canis familiaris' || s === 'canis lupus familiaris';
@@ -282,6 +308,8 @@
     .shot i { display:block; font-style:normal; font-size:11px; line-height:14px; color:var(--secondary-text-color); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .more { flex:none; align-self:center; padding:6px 12px; border-radius:999px; font-size:12px; font-weight:600; background:rgba(var(--wl-rgb),.12); color:var(--primary-color); }
     .srcrow { padding-top:2px; }
+    .shot .hd { position:absolute; left:4px; top:3px; min-width:16px; padding:0 3px; border-radius:999px; font-size:11px; line-height:16px; text-align:center; background:var(--primary-color); color:var(--text-primary-color,#fff); }
+    .stage .also { border-top:1px solid var(--divider-color,rgba(127,127,127,.3)); }
     .shotwrap { position:relative; background:#000; }
     .shotwrap .nav { top:calc(50% - 18px); }
     .stage .media.spec { aspect-ratio:2/1; object-fit:fill; }
@@ -318,6 +346,8 @@
         clipLeadOut: c.clip_lead_out != null && c.clip_lead_out !== '' && Number.isFinite(+c.clip_lead_out) ? Math.max(0, +c.clip_lead_out) : 0,
         frigate: { url: String(c.frigate_url || '').replace(/\/+$/, ''), addon: String(c.frigate_addon || '').trim() },
         birdnet: { url: String(c.birdnet_url || '').replace(/\/+$/, ''), addon: String(c.birdnet_addon || '').trim() },
+        correlate: !!c.correlate,
+        window: Math.min(3600, Math.max(5, Number.isFinite(+c.correlate_window) && +c.correlate_window > 0 ? +c.correlate_window : 120)),
         heardIgnore: new Set([...NON_WILDLIFE_SOUNDS, ...(Array.isArray(c.heard_ignore) ? c.heard_ignore : [])].map(normKey)),
         species: list ? list.map((s) => ({
           id: s.id, name: s.name || pretty(s.id), one: s.one || (s.name || pretty(s.id)).replace(/e?s$/, ''),
@@ -336,7 +366,7 @@
         view: ['species', 'hour', 'camera'].includes(saved.view) ? saved.view : 'species',
         min: Number.isFinite(saved.min) ? saved.min : Math.min(99, Math.max(50, +c.min_score || 70)),
         sp: null, cell: null, tune: false, cur: null, clip: false, limit: 60,
-        src: saved.src === 'heard' && (c.birdnet_url || c.birdnet_addon) ? 'heard' : 'seen', allRows: false,
+        src: (saved.src === 'heard' || (saved.src === 'both' && c.correlate)) && (c.birdnet_url || c.birdnet_addon) ? saved.src : 'seen', allRows: false,
       };
       this._events = new Map();
       this._dynMeta = new Map();
@@ -346,7 +376,7 @@
       this._heard = new Map();
       this._heardMeta = new Map();
       this._hLoaded = false; this._hError = null; this._hDenied = false; this._hCut = false;
-      this._hNewest = 0; this._hSpan = 0; this._bn = null;
+      this._hNewest = 0; this._hSpan = 0; this._bn = null; this._pairCache = null;
       if (this._root) { this._build(); this._refresh(true); }
     }
 
@@ -375,6 +405,50 @@
     _refresh(full) { this._fetch(full); if (this._bnOn()) this._fetchHeard(full); }
     _playing() { return [...(this._root?.querySelectorAll('video,audio') || [])].some((m) => !m.paused && !m.ended); }
     _isHeard() { return this._ui.src === 'heard' && this._heardAvail(); }
+    _isBoth() { return this._ui.src === 'both' && this._cfg.correlate && this._heardAvail(); }
+
+    /* ---------- seen and heard together ----------
+       A sighting is paired with the calls of the same kind of animal, picked
+       up by the microphone that carries its camera's name, from a little
+       before it began to a little after it ended. The pairing is worked out
+       once per load; which call stands for the pair is settled at view time,
+       since the confidence filter may rule the best one out. */
+    _pairs() {
+      if (this._pairCache) return this._pairCache;
+      const w = this._cfg.window; const by = new Map();
+      for (const h of this._heard.values()) { const k = normKey(h.cam); if (!by.has(k)) by.set(k, []); by.get(k).push(h); }
+      for (const l of by.values()) l.sort((a, b) => a.start - b.start);
+      const seen = new Map(); const heard = new Map();
+      for (const e of this._events.values()) {
+        const l = by.get(normKey(e.cam)); if (!l) continue;
+        const from = e.start - w; const to = (e.end || e.start) + w;
+        let lo = 0; let hi = l.length;
+        while (lo < hi) { const mid = (lo + hi) >> 1; if (l[mid].start < from) lo = mid + 1; else hi = mid; }
+        const c = [];
+        for (let i = lo; i < l.length && l[i].start <= to; i++) { const rank = sameKind(e, l[i]); if (rank) c.push({ h: l[i], rank }); }
+        if (!c.length) continue;
+        c.sort((a, b) => b.rank - a.rank || b.h.score - a.h.score);
+        seen.set(e.id, c.map((x) => x.h));
+        for (const x of c) if (!heard.has(x.h.id)) heard.set(x.h.id, e);
+      }
+      this._pairCache = { seen, heard };
+      return this._pairCache;
+    }
+    _match(e) {
+      if (!this._cfg.correlate || !this._heardAvail() || e.heard) return null;
+      const min = this._ui.min / 100;
+      return this._pairs().seen.get(e.id)?.find((h) => h.score >= min) || null;
+    }
+    _matchSeen(h) {
+      if (!this._cfg.correlate) return null;
+      const e = this._pairs().heard.get(h.id);
+      return e && e.score >= this._ui.min / 100 ? e : null;
+    }
+    _timing(e, h) {
+      if (h.start < e.start) return `${span(e.start - h.start)} before`;
+      if (e.end && h.start > e.end) return `${span(h.start - e.end)} after`;
+      return 'while in view';
+    }
 
     /* ---------- time helpers (HA time zone, not the browser's) ---------- */
     _fmt() {
@@ -495,7 +569,7 @@
         await this._coyotes(dogs);
         for (const [id, e] of this._events) if (e.start < horizon) this._events.delete(id);
         this._newest = Math.max(0, ...[...this._events.values()].map((e) => e.start));
-        this._span = this._ui.days; this._loaded = true; this._error = null;
+        this._span = this._ui.days; this._loaded = true; this._error = null; this._pairCache = null;
       } catch (err) {
         this._error = err?.message || err?.code || String(err);
       }
@@ -642,7 +716,7 @@
         for (const d of rows) this._putHeard(d);
         for (const [id, e] of this._heard) if (e.day < first) this._heard.delete(id);
         this._hNewest = Math.max(0, ...[...this._heard.values()].map((e) => e.start));
-        this._hSpan = this._ui.days; this._hLoaded = true; this._hError = null;
+        this._hSpan = this._ui.days; this._hLoaded = true; this._hError = null; this._pairCache = null;
       } catch (err) {
         /* Ingress answers those allowed to open the add-on. For anyone else
            there is nothing to hear, which is not a fault: the switch is
@@ -824,10 +898,11 @@
     /* ---------- derived ---------- */
     _store() { return this._isHeard() ? this._heard : this._events; }
     _fixed() { return !this._isHeard() && !!this._cfg.species; }   // a species list written out, rather than discovered
-    _word(n) { return `${this._isHeard() ? 'detection' : 'sighting'}${n === 1 ? '' : 's'}`; }
+    _word(n) { return this._isBoth() ? (n === 1 ? 'match' : 'matches') : `${this._isHeard() ? 'detection' : 'sighting'}${n === 1 ? '' : 's'}`; }
     _visible() {
       const min = this._ui.min / 100; const first = this._days()[0]?.key;
-      return [...this._store().values()].filter((e) => e.score >= min && e.day >= first).sort((a, b) => b.start - a.start);
+      const list = [...this._store().values()].filter((e) => e.score >= min && e.day >= first).sort((a, b) => b.start - a.start);
+      return this._isBoth() ? list.filter((e) => this._match(e)) : list;
     }
     _hidden() {
       const min = this._ui.min / 100; const first = this._days()[0]?.key; let n = 0;
@@ -1027,6 +1102,20 @@
       return { rgb: G, icon: this._cfg.icon, p, s };
     }
 
+    _headlineBoth(all) {
+      const G = '76,175,80'; const w = span(this._cfg.window);
+      if (!all.length) {
+        return { rgb: G, icon: this._cfg.icon, p: 'Nothing seen and heard together in this period',
+          s: `A match is a call of the same kind of animal within ${w} of a sighting, from a microphone that has its camera's name.` };
+      }
+      const n = {}; const cams = new Set();
+      for (const e of all) { const h = this._match(e); n[h.spName] = (n[h.spName] || 0) + 1; cams.add(e.cam); }
+      const top = Object.keys(n).sort((a, b) => n[b] - n[a]);
+      const s = [top.slice(0, 3).map((k) => `${k} ×${n[k]}`).join(', ') + (top.length > 3 ? ` and ${top.length - 3} more` : ''),
+        `${cams.size} location${cams.size === 1 ? '' : 's'}`, `calls within ${w} of the sighting`].join(' · ');
+      return { rgb: G, icon: this._cfg.icon, p: `${all.length} ${all.length === 1 ? 'sighting was' : 'sightings were'} also heard`, s };
+    }
+
     /* ---------- rendering ---------- */
     _build() {
       this._root.innerHTML = `<style>${CSS}</style><ha-card>
@@ -1054,7 +1143,8 @@
       if (!this._root) return;
       const u = this._ui;
       if (this._frigateOn() && !this._frigateHere()) this._frigateBase();   // warm, so the link is ready before a sighting is opened
-      const all = (this._isHeard() ? this._hLoaded : this._loaded) ? this._visible() : [];
+      const loaded = this._isHeard() ? this._hLoaded : this._isBoth() ? this._loaded && this._hLoaded : this._loaded;
+      const all = loaded ? this._visible() : [];
       this._all = all;
       const seg = (name, cur, opts) => `<span class="seg" role="group">${opts.map(([v, l]) => `<button data-act="${name}" data-v="${v}" aria-pressed="${String(v) === String(cur)}">${l}</button>`).join('')}</span>`;
       this._$('.head').innerHTML = `<div class="title">${esc(this._cfg.title)}</div>
@@ -1071,19 +1161,21 @@
       const blank = () => { for (const k of ['.tiles', '.chart', '.browser']) this._$(k).innerHTML = ''; };
       /* The switch stays put whatever the state of either side, so a failure
          on one never strands the viewer on it. */
-      this._$('.srcwrap').innerHTML = this._heardAvail() ? `<div class="sub srcrow"><h3>${heard ? 'Heard by the microphones' : 'Seen by the cameras'}</h3>
-        ${seg('src', u.src, [['seen', 'Seen'], ['heard', 'Heard']])}</div>` : '';
-      const err = heard ? this._hError : this._error;
+      const both = this._isBoth();
+      this._$('.srcwrap').innerHTML = this._heardAvail() ? `<div class="sub srcrow"><h3>${heard ? 'Heard by the microphones' : both ? 'Seen and heard together' : 'Seen by the cameras'}</h3>
+        ${seg('src', heard ? 'heard' : both ? 'both' : 'seen', [['seen', 'Seen'], ['heard', 'Heard'], ...(this._cfg.correlate ? [['both', 'Both']] : [])])}</div>` : '';
+      const hErr = (heard || both) && this._hError;
+      const err = hErr || (!heard && this._error);
       if (err) {
-        this._$('.hlwrap').innerHTML = heard
+        this._$('.hlwrap').innerHTML = hErr
           ? `<div class="err">Could not read BirdNET-Go (${esc(err)}). Check that it is running and that <b>${this._cfg.birdnet.url ? 'birdnet_url' : 'birdnet_addon'}</b> is right.</div>`
           : `<div class="err">Could not read Frigate events (${esc(err)}). Check that the Frigate integration is loaded and that <b>instance_id</b> matches its MQTT client id.</div>`;
         /* What was read before the failure is still worth showing under it. */
-        if (heard ? this._hLoaded : this._loaded) { this._tiles(all); this._chart(all); this._browser(all); } else blank();
+        if (loaded) { this._tiles(all); this._chart(all); this._browser(all); } else blank();
         return;
       }
-      if (!(heard ? this._hLoaded : this._loaded)) { this._$('.hlwrap').innerHTML = `<div class="empty">Loading ${heard ? 'what was heard' : 'sightings'}…</div>`; blank(); return; }
-      const h = heard ? this._headlineHeard(all) : this._headline(all);
+      if (!loaded) { this._$('.hlwrap').innerHTML = `<div class="empty">Loading ${heard || (both && this._loaded) ? 'what was heard' : 'sightings'}…</div>`; blank(); return; }
+      const h = heard ? this._headlineHeard(all) : both ? this._headlineBoth(all) : this._headline(all);
       this._$('.hlwrap').innerHTML = `<div class="panel hl" style="--hl:${h.rgb}"><div class="shape"><ha-icon icon="${h.icon}"></ha-icon></div>
         <div><div class="p">${esc(h.p)}</div><div class="s">${esc(h.s)}</div></div></div>`;
       this._tiles(all); this._chart(all); this._browser(all);
@@ -1165,7 +1257,7 @@
       for (let i = n - 1 - step; i >= 0; i -= step) ticks += `<span style="left:${((i + 0.5) / n) * 100}%">${esc(f.md.format(new Date(days[i].ts * 1000)))}</span>`;
       ticks += '<span class="end" style="left:100%">Today</span>';
       const sp = u.sp ? this._spec(u.sp).name : heard ? 'Everything heard' : 'All wildlife';
-      const title = u.view === 'species' ? (heard ? 'Detections per day' : 'Sightings per day') : u.view === 'hour' ? `${sp} · time of day` : `${sp} · by ${heard ? 'microphone' : 'camera'}`;
+      const title = u.view === 'species' ? (heard ? 'Detections per day' : this._isBoth() ? 'Seen and heard per day' : 'Sightings per day') : u.view === 'hour' ? `${sp} · time of day` : `${sp} · by ${heard ? 'microphone' : 'camera'}`;
       const rest = unlisted ? `<button class="allrows" data-act="allrows">Show ${unlisted} more species</button>` : '';
       const seg = [['species', 'Species'], ['hour', 'Time'], ['camera', 'Location']].map(([v, l]) => `<button data-act="view" data-v="${v}" aria-pressed="${u.view === v}">${l}</button>`).join('');
       this._$('.chart').innerHTML = `<div class="sub"><h3>${esc(title)}</h3><span class="seg" role="group">${seg}</span></div>
@@ -1191,10 +1283,11 @@
       const shots = list.slice(0, u.limit).map((e, i) => {
         const g = this._spec(e.sp).glyph;
         const src = heard ? this._bnMedia('species', e) : this._thumb(e);
-        const under = heard ? (u.sp ? pretty(e.cam) : e.spName) : (e.inferred ? `${pretty(e.cam)} · likely coyote` : pretty(e.cam));
+        const m = heard ? null : this._match(e);
+        const under = heard ? (u.sp ? pretty(e.cam) : e.spName) : this._isBoth() ? `${m.spName} · ${pretty(e.cam)}` : (e.inferred ? `${pretty(e.cam)} · likely coyote` : pretty(e.cam));
         return `<button class="shot" data-act="open" data-i="${i}" aria-current="${u.cur === e.id}">
         <div class="pic"><span>${g}</span>${src ? `<img loading="lazy" alt="" ${heard ? 'data-heard' : `data-id="${esc(e.id)}"`} src="${esc(src)}">` : ''}
-        <span class="sc">${Math.round(e.score * 100)}%</span>${u.sp ? '' : `<span class="gl">${g}</span>`}</div>
+        <span class="sc">${Math.round(e.score * 100)}%</span>${u.sp ? '' : `<span class="gl">${g}</span>`}${m ? `<span class="hd" title="Also heard: ${esc(m.spName)}">♪</span>` : ''}</div>
         <b>${esc(this._when(e.start))}</b><i>${esc(under)}</i></button>`;
       }).join('');
       const more = list.length > u.limit ? `<button class="more" data-act="more">+${list.length - u.limit} more</button>` : '';
@@ -1219,13 +1312,25 @@
       const media = this._ui.clip && e.clip
         ? `<video class="media" controls playsinline muted preload="metadata" poster="${esc(still)}"${pad ? ` data-vod-hls="${esc(pad.hls)}" data-vod-mp4="${esc(pad.mp4)}"` : ''} data-hls="${esc(this._media(e.id, 'index.m3u8'))}" data-mp4="${esc(this._media(e.id, 'clip.mp4'))}"></video>`
         : `<img class="media" alt="${esc(this._name(e))}" data-id="${esc(e.id)}" data-kind="${e.snap ? 'snapshot' : 'thumbnail'}" src="${esc(still)}">`;
+      /* The call that goes with this sighting, when there is one. Its recording
+         comes through the same ingress session as the rest of what is heard. */
+      const m = this._match(e); let also = '';
+      if (m) {
+        const fresh = this._bnFresh();
+        if (!fresh && this._restaged !== e.id) {
+          this._restaged = e.id;
+          this._bnBase(true).then(() => { if (this._ui.cur === e.id) this._stage(); }).catch(() => {});
+        }
+        also = `<div class="also">${fresh && m.clip ? `<audio class="player" controls preload="none" data-heard src="${esc(this._bnMedia('audio', m))}"></audio>` : ''}
+          <div class="note">Heard ${esc(this._timing(e, m))}: <b>${esc(m.spName)}</b> · ${Math.round(m.score * 100)}% · ${esc(pretty(m.cam))} microphone${m.clip ? '' : ' · recording no longer kept'}</div></div>`;
+      }
       const dur = e.end ? Math.max(1, Math.round(e.end - e.start)) : null;
       const meta = [pretty(e.cam), `${Math.round(e.score * 100)}%${e.inferred ? ' as dog' : ''}`, dur ? (dur >= 90 ? `${Math.round(dur / 60)} min` : `${dur}s`) : 'in progress', ...e.zones.slice(0, 2).map(pretty)];
       wrap.innerHTML = `<div class="stage">${media}
         <button class="nav l" data-act="step" data-v="-1" aria-label="Newer" ${i === 0 ? 'disabled' : ''}>${svg('left')}</button>
         <button class="nav r" data-act="step" data-v="1" aria-label="Older" ${i >= list.length - 1 ? 'disabled' : ''}>${svg('right')}</button>
         <button class="x" data-act="close" aria-label="Close">${svg('close')}</button>
-        <span class="pos">${i + 1} / ${list.length}</span>
+        <span class="pos">${i + 1} / ${list.length}</span>${also}
         <div class="cap"><div class="t"><div class="p">${esc(this._name(e))}</div><div class="s">${esc([this._when(e.start), ...meta].join(' · '))}</div></div>
           ${e.clip ? (this._ui.clip ? `<button class="pill" data-act="still">${svg('image')}Photo</button>` : `<button class="pill" data-act="clip">${svg('play')}Video</button>`) : ''}
           ${this._frigateHere()
@@ -1251,7 +1356,8 @@
         return;
       }
       const sci = e.sci && normKey(e.sci) !== normKey(e.spName) ? e.sci : '';
-      const meta = [this._when(e.start), pretty(e.cam), `${Math.round(e.score * 100)}%`, ...(e.fresh ? ['new here'] : [])];
+      const seenToo = this._matchSeen(e);
+      const meta = [this._when(e.start), pretty(e.cam), `${Math.round(e.score * 100)}%`, ...(e.fresh ? ['new here'] : []), ...(seenToo ? ['seen on camera too'] : [])];
       /* Inside the Companion apps a new tab leaves with no ingress session,
          as it does for Frigate, so the link is only offered where it works. */
       const away = this._cfg.birdnet.addon && !this._cfg.birdnet.url && (/Home Assistant\//.test(navigator.userAgent) || !!window.externalApp || !!window.webkit?.messageHandlers?.externalBus)
@@ -1437,6 +1543,8 @@
     birdnet_addon: ['BirdNET-Go add-on', 'Its slug, for a BirdNET-Go running as an add-on. Adds a Seen / Heard switch with the calls it has identified.'],
     birdnet_url: ['BirdNET-Go address', 'For a BirdNET-Go that is not an add-on, e.g. http://192.168.1.10:8080. Used in preference to the slug.'],
     heard_ignore: ['Heard labels to leave out', 'Besides engines, voices, sirens and dogs, which are always left out.'],
+    correlate: ['Seen and heard together', 'Pair a sighting with a call of the same kind of animal, from the microphone named as its camera, at the same time. Adds Both to the switch.'],
+    correlate_window: ['Same-time window', 'Seconds before or after a sighting that a call may fall. 120 unless set.'],
     coyote: ['Coyotes', ''],
     enabled: ['Infer coyotes from night-time dogs', 'Frigate cannot detect a coyote, so a dog alone at night stands in for one.'],
     cameras: ['Cameras to watch', 'Where a night-time dog counts as a likely coyote.'],
@@ -1484,7 +1592,13 @@
         { name: 'birdnet_addon', selector: { text: {} } },
         { name: 'birdnet_url', selector: { text: {} } },
       ] },
-      ...(birdnet ? [{ name: 'heard_ignore', selector: { select: { multiple: true, custom_value: true, mode: 'dropdown', options: [] } } }] : []),
+      ...(birdnet ? [
+        { name: 'heard_ignore', selector: { select: { multiple: true, custom_value: true, mode: 'dropdown', options: [] } } },
+        { type: 'grid', name: '', schema: [
+          { name: 'correlate', selector: { boolean: {} } },
+          { name: 'correlate_window', selector: { number: { min: 5, max: 3600, step: 5, mode: 'box', unit_of_measurement: 'seconds' } } },
+        ] },
+      ] : []),
       { type: 'expandable', name: 'coyote', title: FIELDS.coyote[0], icon: 'mdi:paw', schema: [
         { name: 'enabled', selector: { boolean: {} } },
         { name: 'cameras', selector: pick },
@@ -1544,6 +1658,7 @@
         auto: c.species === 'auto',
         ignore_labels: Array.isArray(c.ignore_labels) ? c.ignore_labels : [],
         heard_ignore: Array.isArray(c.heard_ignore) ? c.heard_ignore : [],
+        correlate: !!c.correlate,
       };
     }
 
@@ -1564,6 +1679,8 @@
       delete config.auto;
       if (!Array.isArray(config.ignore_labels) || !config.ignore_labels.length) delete config.ignore_labels;
       if (!Array.isArray(config.heard_ignore) || !config.heard_ignore.length) delete config.heard_ignore;
+      if (!config.correlate) delete config.correlate;
+      if (!(+config.correlate_window > 0)) delete config.correlate_window;
       /* An emptied field should leave no key behind. */
       for (const k of ['frigate_addon', 'frigate_url', 'birdnet_addon', 'birdnet_url', 'clip_lead_in', 'clip_lead_out']) {
         if (config[k] === '' || config[k] == null) delete config[k];

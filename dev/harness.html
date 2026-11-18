@@ -11,6 +11,7 @@
                 ?quiet=1 no coyote pack in the data · ?hls=1 claim native HLS
                 ?nosun=1 no latitude, so no day/night shading
                 ?heard=1 a BirdNET-Go to listen to (set birdnet_url or birdnet_addon in ?config)
+                ?heard=pairs only a handful of calls, each placed against a known sighting
                 ?bnfail=503 that BirdNET-Go answers every request with this status
 -->
 <html lang="en">
@@ -131,7 +132,35 @@ const hear = (common, sci, ago, conf, src = 'Backyard', extra = {}) => {
     verified: 'unverified', locked: false, source: { id: `rtsp_${src.toLowerCase()}`, type: 'rtsp', displayName: src }, ...extra,
   });
 };
-if (q.get('heard')) {
+/* Calls placed against particular sightings, so the pairing can be checked
+   one case at a time without a chorus adding matches of its own. */
+window.plan = {};
+if (q.get('heard') === 'pairs') {
+  const old = (e) => now - e.start_time > 7200 && now - e.start_time < 12 * 86400;
+  const taken = new Set();
+  const find = (test) => { const e = events.find((x) => old(x) && !taken.has(x.id) && test(x)); taken.add(e.id); return e; };
+  const near = (e, common, sci, offset, conf, src) => hear(common, sci, now - (e.start_time + offset), conf, src || e.camera.replace(/_/g, ' '));
+  const plain = find((e) => e.label === 'bird' && !e.sub_label && e.camera === 'Backyard');
+  near(plain, 'Song Sparrow', 'Melospiza melodia', 5, 0.84); near(plain, 'American Robin', 'Turdus migratorius', 9, 0.93);
+  const junco = find((e) => e.sub_label === 'dark_eyed_junco' && e.camera === 'Front');
+  near(junco, 'Song Sparrow', 'Melospiza melodia', 3, 0.97); near(junco, 'Dark-eyed Junco', 'Junco hyemalis', 6, 0.8);
+  const other = find((e) => e.sub_label === 'dark_eyed_junco' && e.camera === 'Backyard');
+  near(other, 'Song Sparrow', 'Melospiza melodia', 4, 0.9);
+  const porch = find((e) => e.label === 'bird' && !e.sub_label && e.camera === 'Garage_porch');
+  near(porch, 'American Crow', 'Corvus brachyrhynchos', -40, 0.88);
+  const away = find((e) => e.label === 'bird' && !e.sub_label && e.camera === 'Side_porch');
+  near(away, 'American Crow', 'Corvus brachyrhynchos', 4, 0.9, 'Backyard');
+  const late = find((e) => e.label === 'bird' && !e.sub_label && e.camera === 'Front');
+  near(late, 'American Crow', 'Corvus brachyrhynchos', late.end_time - late.start_time + 400, 0.9);
+  const cat = find((e) => e.label === 'cat');
+  near(cat, 'Song Sparrow', 'Melospiza melodia', 5, 0.9);
+  const coyote = find((e) => e.label === 'dog' && e.camera === 'Front');
+  near(coyote, 'Coyote', 'Canis latrans', 8, 0.9);
+  const squirrel = find((e) => e.label === 'squirrel');
+  near(squirrel, 'Douglas Squirrel', 'Tamiasciurus douglasii', 2, 0.86);
+  window.plan = Object.fromEntries(Object.entries({ plain, junco, other, porch, away, late, cat, coyote, squirrel }).map(([k, e]) => [k, e.id]));
+}
+if (q.get('heard') && q.get('heard') !== 'pairs') {
   const CHORUS = [
     ['Dark-eyed Junco', 'Junco hyemalis', 14], ['Black-capped Chickadee', 'Poecile atricapillus', 11],
     ['American Robin', 'Turdus migratorius', 9], ['Song Sparrow', 'Melospiza melodia', 8],
@@ -154,6 +183,8 @@ if (q.get('heard')) {
   }
   if (!q.get('quiet')) hear('Coyote', 'Canis latrans', at(1, 2.6), 0.91, 'Front');
   hear('Song Sparrow', 'Melospiza melodia', at(2, 9), 0.95, 'Backyard', { verified: 'false_positive' });
+}
+if (q.get('heard')) {
   heardRows.sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
 
   const realFetch = window.fetch.bind(window);
