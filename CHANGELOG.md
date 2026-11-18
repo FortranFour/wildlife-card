@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.5.0-beta.5 — 2026-11-18
+
+- **A playhead on the spectrogram.** A line crosses the spectrogram at the point being played, since the browser's own progress bar is inset and cannot line up with the picture. A click on the spectrogram plays from there.
+- **Repeat.** A button on the stage loops a recording or a sighting's video. The setting is remembered.
+- **A confidence threshold of their own for calls.** `heard_min_score` sets where it opens (the sightings' value unless set), the Heard side's slider moves it, and Both shows a slider for each side.
+- **In Both, the call is drawn under the picture.** A paired sighting shows the call's spectrogram, with its playhead, beside BirdNET-Go's picture of the species it named. It stays there while the sighting's video plays.
+- **A background refresh no longer waits for, or cuts off, what is playing.** The card is redrawn around a stage that is playing.
+
 ## 1.5.0-beta.4 — 2026-11-18
 
 - **Leaving dogs out of discovery no longer switches off the coyote inference.** With species discovered automatically and `dog` in `ignore_labels`, dogs were dropped from the request to Frigate, so no night-time dog was ever weighed as a likely coyote. They are now asked for separately on the coyote cameras.

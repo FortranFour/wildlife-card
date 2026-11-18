@@ -579,7 +579,7 @@ const shot = async (page, name) => {
   await page.click$(".chips .chip");
   await page.click$('[data-act="tune"]');
   const before = await page.$eval("wildlife-card", (c) => c._all.length);
-  await page.$eval("wildlife-card input[name=min]", (i) => { i.value = 95; i.dispatchEvent(new Event("input", { bubbles: true, composed: true })); });
+  await page.$eval("wildlife-card input[name=hmin]", (i) => { i.value = 95; i.dispatchEvent(new Event("input", { bubbles: true, composed: true })); });
   await page.waitForTimeout(250);
   check((await page.$eval("wildlife-card", (c) => c._all.length)) < before && /detection/.test(await page.text$(".hid")), "the confidence filter applies to detections, and says detections");
   await page.click$('[data-act="src"][data-v="seen"]');
@@ -749,7 +749,7 @@ const shot = async (page, name) => {
   /* the confidence filter can rule the better call out, and the pair with it */
   await page.click$('[data-act="close"]');
   await page.click$('[data-act="tune"]');
-  await page.$eval("wildlife-card input[name=min]", (i) => { i.value = 87; i.dispatchEvent(new Event("input", { bubbles: true, composed: true })); });
+  await page.$eval("wildlife-card input[name=hmin]", (i) => { i.value = 87; i.dispatchEvent(new Event("input", { bubbles: true, composed: true })); });
   await page.waitForTimeout(250);
   const strict = await page.evaluate(() => {
     const c = window.card; const m = (k) => { const e = c._events.get(window.plan[k]); const h = c._match(e); return h ? h.spName : null; };
@@ -758,7 +758,7 @@ const shot = async (page, name) => {
   check(strict.junco === null && strict.squirrel === null, "a call under the confidence filter no longer makes a pair");
 
   /* the heard side knows it was seen */
-  await page.$eval("wildlife-card input[name=min]", (i) => { i.value = 70; i.dispatchEvent(new Event("input", { bubbles: true, composed: true })); });
+  await page.$eval("wildlife-card input[name=hmin]", (i) => { i.value = 70; i.dispatchEvent(new Event("input", { bubbles: true, composed: true })); });
   await page.waitForTimeout(250);
   await page.click$('[data-act="src"][data-v="heard"]');
   await page.evaluate(() => { const c = window.card; c._ui.cur = c._list.find((e) => e.spName === "Coyote").id; c._stage(); });
@@ -797,6 +797,107 @@ const shot = async (page, name) => {
   });
   check(out.offered && out.on.correlate === true && out.on.correlate_window === 60, "the editor offers the pairing and its window");
   check(!("correlate" in out.off) && !("correlate_window" in out.off), "and leaves no keys behind when it is off");
+  await ed.close();
+}
+
+/* 21 — the playhead on the spectrogram, repeat, a threshold for calls, and the strip in Both */
+{
+  const BN = (extra = {}) => encodeURIComponent(JSON.stringify({ birdnet_url: "http://birdnet.local:8080", ...extra }));
+  const page = await open(`&heard=1&config=${BN()}`);
+  await page.waitForFunction("window.card._hLoaded === true");
+  await page.click$('[data-act="src"][data-v="heard"]');
+  await page.click$(".shot");
+  const box = () => page.evaluate(() => { const el = window.card.shadowRoot.querySelector(".stage .shotwrap img.spec"); el.scrollIntoView({ block: "center" }); const r = el.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; });
+  const head = () => page.evaluate(() => { const h = window.card.shadowRoot.querySelector(".stage .playhead"); const a = window.card.shadowRoot.querySelector(".stage audio"); return { left: parseFloat(h.style.left) || 0, on: h.style.opacity === "1", paused: a.paused, ended: a.ended, loop: a.loop, t: a.currentTime, d: a.duration }; });
+  check((await head()).on === false, "the playhead is out of sight until something plays");
+  let b = await box();
+  await page.mouse.click(b.x + b.w * 0.5, b.y + b.h * 0.3);
+  await page.waitForFunction(() => window.card.shadowRoot.querySelector(".stage audio").ended, null, { timeout: 5000 });
+  let h = await head();
+  check(h.on && h.left > 99, `a click on the spectrogram plays from there, and the line runs to the end with the sound (${h.left.toFixed(0)}%)`);
+
+  /* repeat: set once, kept on the element, and remembered for the next one */
+  check((await page.$$c('.stage [data-act="loop"][aria-pressed="false"]')).length === 1, "the stage offers repeat, off to begin with");
+  await page.click$('.stage [data-act="loop"]');
+  h = await head();
+  check(h.loop === true && (await page.$$c('.stage [data-act="loop"][aria-pressed="true"]')).length === 1, "turning it on sets the player to loop");
+  b = await box();
+  await page.mouse.click(b.x + b.w * 0.25, b.y + b.h * 0.3);
+  await page.waitForTimeout(900);
+  h = await head();
+  check(!h.paused && !h.ended && h.left >= 0 && h.left <= 100, "and the recording goes round rather than stopping");
+
+  /* a background refresh leaves what is playing alone */
+  const kept = await page.evaluate(async () => {
+    const c = window.card; const a = c.shadowRoot.querySelector(".stage audio"); a._mark = 1;
+    c._refresh(false);
+    await new Promise((r) => setTimeout(r, 600));
+    const now = c.shadowRoot.querySelector(".stage audio");
+    return { same: now && now._mark === 1, playing: now && !now.paused, tiles: c.shadowRoot.querySelectorAll(".tile").length };
+  });
+  check(kept.same && kept.playing && kept.tiles === 8, "a background refresh redraws the card around a recording that is playing");
+  await page.click$('[data-act="step"][data-v="1"]');
+  check((await head()).loop === true, "repeat carries to the next recording");
+  await page.click$('[data-act="src"][data-v="seen"]');
+  await page.click$(".shot");
+  check(await page.evaluate(() => {
+    const r = window.card.shadowRoot; r.querySelector('.stage [data-act="clip"]').click();   // the harness has no clip to serve, so look before it gives up
+    return r.querySelector(".stage video")?.loop === true && !!r.querySelector('.stage [data-act="loop"][aria-pressed="true"]');
+  }), "and to a sighting's video");
+  await page.close();
+
+  /* a threshold of its own for what is heard */
+  const strict = await open(`&heard=1&config=${BN({ heard_min_score: 90 })}`);
+  await strict.waitForFunction("window.card._hLoaded === true");
+  const seenN = await strict.$eval("wildlife-card", (c) => c._all.length);
+  await strict.click$('[data-act="src"][data-v="heard"]');
+  const stats = await strict.evaluate(() => { const c = window.card; return { low: c._all.filter((e) => e.score < 0.9).length, n: c._all.length, all: c._heard.size }; });
+  check(stats.low === 0 && stats.n > 0 && stats.n < stats.all, `heard_min_score filters calls on its own (${stats.n} of ${stats.all})`);
+  await strict.click$('[data-act="tune"]');
+  check(!!(await strict.$("wildlife-card input[name=hmin]")) && !(await strict.$("wildlife-card input[name=min]")) && (await strict.text$('.tune output[data-for="hmin"]')) === "90%", "the slider on the Heard side is the calls' own");
+  await strict.click$('[data-act="src"][data-v="seen"]');
+  check((await strict.$eval("wildlife-card", (c) => c._all.length)) === seenN && !!(await strict.$("wildlife-card input[name=min]")) && (await strict.text$('.tune output[data-for="min"]')) === "70%", "and sightings keep theirs");
+  await strict.close();
+
+  /* Both: the sound drawn under the picture, beside the species it names */
+  const both = await open(`&heard=pairs&config=${BN({ correlate: true })}`);
+  await both.waitForFunction("window.card._hLoaded === true && window.card._loaded === true");
+  await both.click$('[data-act="src"][data-v="both"]');
+  await both.click$('[data-act="tune"]');
+  check((await both.$$c(".tune input[type=range]")).length === 2, "Both offers a slider for each side");
+  await both.click$('[data-act="tune"]');
+  await both.evaluate(() => { const c = window.card; c._ui.cur = window.plan.junco; c._stage(); });
+  const strip = await both.evaluate(() => {
+    const r = window.card.shadowRoot; const sg = r.querySelector(".stage .strip .sg"); const ref = r.querySelector(".stage .strip img.ref");
+    return { sg: !!sg?.querySelector("img.stripimg"), head: !!sg?.querySelector(".playhead"), ref: ref?.getAttribute("title"), pic: !!r.querySelector(".stage > img.media"), loop: !!r.querySelector('.stage [data-act="loop"]') };
+  });
+  check(strip.sg && strip.head && strip.pic, "a paired sighting shows the call's spectrogram under the camera picture");
+  check(strip.ref === "Dark-eyed Junco" && strip.loop, "with BirdNET-Go's picture of the species it named, and repeat");
+  const r = await both.evaluate(() => { const el = window.card.shadowRoot.querySelector(".stage .strip .sg"); el.scrollIntoView({ block: "center" }); const q = el.getBoundingClientRect(); return { x: q.left, y: q.top, w: q.width, h: q.height }; });
+  await both.mouse.click(r.x + r.w * 0.5, r.y + r.h * 0.5);
+  await both.waitForFunction(() => window.card.shadowRoot.querySelector(".stage audio").ended, null, { timeout: 5000 });
+  check(await both.evaluate(() => { const h = window.card.shadowRoot.querySelector(".stage .playhead"); return h.style.opacity === "1" && parseFloat(h.style.left) > 99; }), "and the strip plays from a click, with its own playhead");
+  check(both.errors.length === 0, `the players run without errors (${both.errors.slice(0, 2).join("; ")})`);
+  check(await both.evaluate(() => { const r = window.card.shadowRoot; r.querySelector('.stage [data-act="clip"]').click(); return !!r.querySelector(".stage video") && !!r.querySelector(".stage .strip .sg img.stripimg"); }), "the strip stays while the video plays");
+  await both.click$('[data-act="still"]');
+  await shot(both, "both-strip.png");
+  await both.close();
+
+  /* the editor: written only when it differs from the sightings' threshold */
+  const ed = await open();
+  const out = await ed.evaluate(async () => {
+    const e = customElements.get("wildlife-card").getConfigElement();
+    document.body.appendChild(e);
+    e.setConfig({ type: "custom:wildlife-card", birdnet_addon: "db21ed7f_birdnet-go", min_score: 70 }); e.hass = window.hass;
+    await new Promise((r) => setTimeout(r, 300));
+    const form = e.querySelector("ha-form");
+    const fire = (value) => new Promise((res) => {
+      e.addEventListener("config-changed", (ev) => res(ev.detail.config), { once: true });
+      form.dispatchEvent(new CustomEvent("value-changed", { detail: { value } }));
+    });
+    return { offered: JSON.stringify(form.schema).includes('"name":"heard_min_score"'), start: form.data.heard_min_score, same: await fire({ ...form.data, title: "T" }), set: await fire({ ...form.data, heard_min_score: 85 }) };
+  });
+  check(out.offered && out.start === 70 && !("heard_min_score" in out.same) && out.set.heard_min_score === 85, "the editor offers the calls' threshold and writes it only when it is set apart");
   await ed.close();
 }
 

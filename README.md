@@ -82,6 +82,7 @@ Quote `start` and `end`. Unquoted, YAML reads `23:00` as a number and the night 
 | `clip_lead_out` | `0` | Extra seconds of recording after the sighting when playing a clip (`0` uses the event clip directly). |
 | `birdnet_addon` | — | Add-on slug of a BirdNET-Go running as an add-on, e.g. `db21ed7f_birdnet-go`. Adds the Seen / Heard switch. See below. |
 | `birdnet_url` | — | The same for a BirdNET-Go that is not an add-on, e.g. `http://192.168.1.10:8080`. Used in preference to the slug. |
+| `heard_min_score` | `min_score` | Initial confidence filter for what is heard. A camera's 70% and a microphone's are different claims, so calls keep a threshold and a slider of their own. |
 | `heard_ignore` | `[]` | Heard labels to leave out, by common or scientific name. Engines, voices, sirens and the like, and dogs, are always left out. |
 | `discover` | `false` | `true` discovers species automatically even though a `species` list is written out. The list stays in the YAML and takes over again when this is turned off. The visual editor's "Discover species automatically" switch sets it. |
 | `correlate` | `false` | Pair each sighting with a call of the same kind of animal, from the microphone named as its camera, at the same time. Adds **Both** to the switch. See below. |
@@ -194,9 +195,9 @@ On the Heard side the card works as it does for sightings, on BirdNET-Go's detec
 
 - **Tiles** for the eight most frequent callers, each with BirdNET-Go's picture of the species. A species it flags as new carries a *new* badge.
 - **The grid** by species (twelve to begin with, the rest on request), by time of day, or by microphone. The time-of-day view keeps its daylight shading, so the dawn chorus and whatever calls after dark are plain to see.
-- **The browser** opens a detection on its spectrogram with the recording under it, and a link to the same detection in BirdNET-Go.
+- **The browser** opens a detection on its spectrogram with the recording under it, and a link to the same detection in BirdNET-Go. A line crosses the spectrogram as the recording plays, and a click on the spectrogram plays from that point. The repeat button keeps a recording, or a sighting's video, going round; it is remembered.
 - **The headline** reports a species heard for the first time in the range, which callers are above or below their usual rate, the busiest two hours and what calls at night. It waits for six days of listening before it compares anything.
-- **The confidence filter** applies to detections too. BirdNET-Go has a threshold of its own, so nothing below that is there to show.
+- **The confidence filter** has a slider of its own for calls, opening at `heard_min_score`. BirdNET-Go has a threshold of its own as well, so nothing below that is there to show; its false-positive filter and dynamic threshold, in its settings, decide what is recorded in the first place.
 
 BirdNET's model names coyotes. One heard in the last 48 hours leads the Heard headline and is noted on the Seen side as well, next to anything the cameras inferred.
 
@@ -210,7 +211,7 @@ With `correlate: true` the card pairs sightings with calls, and the switch gains
 
 When several calls qualify, the same species wins over the same kind, and then the most confident. A call under the card's confidence filter makes no pair.
 
-On **Both**, each shot names what was heard, and opening one puts the recording under the picture with how the two were timed ("Heard 40 s before"). The same line and player appear on the Seen side, where paired sightings carry a ♪ mark, and a call that was also seen says so on the Heard side.
+On **Both**, each shot names what was heard, and opening one puts the call under the camera picture: its spectrogram, beside BirdNET-Go's picture of the species it named, then the recording and how the two were timed ("Heard 40 s before"). The strip stays in place while the sighting's video plays. The same line and player appear on the Seen side, where paired sightings carry a ♪ mark, and a call that was also seen says so on the Heard side.
 
 A pair is evidence, not proof: with a busy dawn chorus and a wide window, a bird in view and a different bird calling nearby will pair by chance. Narrow the window to tighten it.
 

@@ -27,6 +27,7 @@
  *   clip_lead_out: 0              # extra seconds after a sighting when playing a clip
  *   birdnet_addon: ''             # BirdNET-Go add-on slug: adds what the microphones hear
  *   birdnet_url: ''               # or its address, for a BirdNET-Go that is not an add-on
+ *   heard_min_score: 70           # initial confidence filter for what is heard; min_score unless set
  *   heard_ignore: []              # heard labels to leave out, besides engines, voices and the like
  *   correlate: false              # pair sightings with calls of the same animal, place and time
  *   correlate_window: 120         # seconds either side of a sighting that still count as the same time
@@ -185,6 +186,7 @@
     play: 'M8,5.14V19.14L19,12.14L8,5.14Z',
     image: 'M8.5,13.5L11,16.5L14.5,12L19,18H5M21,19V5C21,3.89 20.1,3 19,3H5A2,2 0 0,0 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19Z',
     open: 'M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z',
+    repeat: 'M17,17H7V14L3,18L7,22V19H19V13H17M7,7H17V10L21,6L17,2V5H5V11H7V7Z',
     find: 'M9.5,3A6.5,6.5 0 0,1 16,9.5C16,11.11 15.41,12.59 14.44,13.73L14.71,14H15.5L20.5,19L19,20.5L14,15.5V14.71L13.73,14.44C12.59,15.41 11.11,16 9.5,16A6.5,6.5 0 0,1 3,9.5A6.5,6.5 0 0,1 9.5,3M9.5,5C7,5 5,7 5,9.5C5,12 7,14 9.5,14C12,14 14,12 14,9.5C14,7 12,5 9.5,5Z',
   };
   const svg = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${ICON[name]}"/></svg>`;
@@ -310,6 +312,14 @@
     .more { flex:none; align-self:center; padding:6px 12px; border-radius:999px; font-size:12px; font-weight:600; background:rgba(var(--wl-rgb),.12); color:var(--primary-color); }
     .srcrow { padding-top:2px; }
     .shot .hd { position:absolute; left:4px; top:3px; min-width:16px; padding:0 3px; border-radius:999px; font-size:11px; line-height:16px; text-align:center; background:var(--primary-color); color:var(--text-primary-color,#fff); }
+    .playhead { position:absolute; top:0; bottom:0; left:0; width:2px; margin-left:-1px; background:#fff; box-shadow:0 0 4px #000; pointer-events:none; opacity:0; }
+    [data-seek] { cursor:pointer; }
+    .strip { display:flex; height:72px; background:#000; }
+    .strip .ref { flex:none; width:72px; height:72px; object-fit:cover; }
+    .strip .sg { position:relative; flex:1; min-width:0; }
+    .strip .stripimg { display:block; width:100%; height:100%; object-fit:fill; }
+    .pill.ghost[aria-pressed="true"] { background:var(--primary-color); color:var(--text-primary-color,#fff); }
+    .tune label + input + label { margin-top:10px; }
     .stage .also { border-top:1px solid var(--divider-color,rgba(127,127,127,.3)); }
     .shotwrap { position:relative; background:#000; }
     .shotwrap .nav { top:calc(50% - 18px); }
@@ -368,6 +378,10 @@
         days: [7, 14, 30].includes(saved.days) ? saved.days : ([7, 14, 30].includes(+c.days) ? +c.days : 14),
         view: ['species', 'hour', 'camera'].includes(saved.view) ? saved.view : 'species',
         min: Number.isFinite(saved.min) ? saved.min : Math.min(99, Math.max(50, +c.min_score || 70)),
+        /* A camera's 70% and a microphone's are not the same claim, so what
+           is heard keeps a threshold of its own. */
+        hmin: Number.isFinite(saved.hmin) ? saved.hmin : Math.min(99, Math.max(50, +c.heard_min_score || +c.min_score || 70)),
+        loop: saved.loop === true,
         sp: null, cell: null, tune: false, cur: null, clip: false, limit: 60,
         src: (saved.src === 'heard' || (saved.src === 'both' && c.correlate)) && (c.birdnet_url || c.birdnet_addon) ? saved.src : 'seen', allRows: false,
       };
@@ -394,16 +408,14 @@
       if (this._hass && !this._loaded) this._refresh(true);
       this._ro = this._ro || new ResizeObserver((r) => this.toggleAttribute('wide', r[0].contentRect.width >= 640));
       this._ro.observe(this);
-      /* A refresh redraws the stage, which would cut off a recording or a clip
-         part-way through, so one that is playing is left to finish. */
-      this._timer = setInterval(() => { if (!document.hidden && !this._playing()) this._refresh(false); }, this._cfg.refresh * 1000);
+      this._timer = setInterval(() => { if (!document.hidden) this._refresh(false); }, this._cfg.refresh * 1000);
     }
     disconnectedCallback() { clearInterval(this._timer); this._ro?.disconnect(); }
     getCardSize() { return 9; }
     getGridOptions() { return { columns: 12, min_columns: 6 }; }
 
     _load() { try { return JSON.parse(localStorage.getItem('wildlife-card') || '{}'); } catch (e) { return {}; } }
-    _save() { try { localStorage.setItem('wildlife-card', JSON.stringify({ days: this._ui.days, view: this._ui.view, min: this._ui.min, src: this._ui.src })); } catch (e) { /* private mode */ } }
+    _save() { try { localStorage.setItem('wildlife-card', JSON.stringify({ days: this._ui.days, view: this._ui.view, min: this._ui.min, hmin: this._ui.hmin, loop: this._ui.loop, src: this._ui.src })); } catch (e) { /* private mode */ } }
 
     _refresh(full) { this._fetch(full); if (this._bnOn()) this._fetchHeard(full); }
     _playing() { return [...(this._root?.querySelectorAll('video,audio') || [])].some((m) => !m.paused && !m.ended); }
@@ -439,7 +451,7 @@
     }
     _match(e) {
       if (!this._cfg.correlate || !this._heardAvail() || e.heard) return null;
-      const min = this._ui.min / 100;
+      const min = this._ui.hmin / 100;
       return this._pairs().seen.get(e.id)?.find((h) => h.score >= min) || null;
     }
     _matchSeen(h) {
@@ -771,7 +783,7 @@
     /* A coyote that is heard matters whichever side of the card is showing. */
     _heardCoyote() {
       if (!this._heardAvail()) return null;
-      const now = Date.now() / 1000; const min = this._ui.min / 100; let hit = null;
+      const now = Date.now() / 1000; const min = this._ui.hmin / 100; let hit = null;
       for (const e of this._heard.values()) {
         if (now - e.start < 172800 && e.score >= min && /coyote/i.test(e.spName) && (!hit || e.start > hit.start)) hit = e;
       }
@@ -907,12 +919,12 @@
     _fixed() { return !this._isHeard() && !!this._cfg.species; }   // a species list written out, rather than discovered
     _word(n) { return this._isBoth() ? (n === 1 ? 'match' : 'matches') : `${this._isHeard() ? 'detection' : 'sighting'}${n === 1 ? '' : 's'}`; }
     _visible() {
-      const min = this._ui.min / 100; const first = this._days()[0]?.key;
+      const min = (this._isHeard() ? this._ui.hmin : this._ui.min) / 100; const first = this._days()[0]?.key;
       const list = [...this._store().values()].filter((e) => e.score >= min && e.day >= first).sort((a, b) => b.start - a.start);
       return this._isBoth() ? list.filter((e) => this._match(e)) : list;
     }
     _hidden() {
-      const min = this._ui.min / 100; const first = this._days()[0]?.key; let n = 0;
+      const min = (this._isHeard() ? this._ui.hmin : this._ui.min) / 100; const first = this._days()[0]?.key; let n = 0;
       for (const e of this._store().values()) if (e.day >= first && e.score < min) n++;
       return n;
     }
@@ -1131,11 +1143,16 @@
       this._$ = (s) => this._root.querySelector(s);
       this._root.addEventListener('click', (ev) => this._click(ev));
       this._root.addEventListener('input', (ev) => {
-        if (ev.target.name !== 'min') return;
-        this._ui.min = +ev.target.value; this._ui.cur = null; this._save();
-        this._$('.tune output').textContent = `${this._ui.min}%`;
+        const name = ev.target.name;
+        if (name !== 'min' && name !== 'hmin') return;
+        this._ui[name] = +ev.target.value; this._ui.cur = null; this._save();
+        this._$(`.tune output[data-for="${name}"]`).textContent = `${this._ui[name]}%`;
         this._render(true);
       });
+      /* Media events do not bubble, but they can be caught on the way down. */
+      for (const t of ['play', 'pause', 'ended', 'seeked', 'timeupdate', 'loadedmetadata']) {
+        this._root.addEventListener(t, (ev) => { if (ev.target.tagName === 'AUDIO') this._playhead(ev.target, t); }, true);
+      }
       this._root.addEventListener('error', (ev) => {
         if (ev.target.tagName === 'IMG' && ev.target.dataset.id) this._imgFallback(ev.target);
         if (ev.target.dataset?.heard != null) this._heardFallback(ev.target);
@@ -1156,11 +1173,13 @@
       const seg = (name, cur, opts) => `<span class="seg" role="group">${opts.map(([v, l]) => `<button data-act="${name}" data-v="${v}" aria-pressed="${String(v) === String(cur)}">${l}</button>`).join('')}</span>`;
       this._$('.head').innerHTML = `<div class="title">${esc(this._cfg.title)}</div>
         ${seg('days', u.days, [[7, '7d'], [14, '14d'], [30, '30d']])}
-        <button class="iconbtn" data-act="tune" aria-expanded="${u.tune}" title="Filters" aria-label="Filters">${svg('tune')}${u.min > 70 ? '<span class="dot"></span>' : ''}</button>`;
+        <button class="iconbtn" data-act="tune" aria-expanded="${u.tune}" title="Filters" aria-label="Filters">${svg('tune')}${(this._isHeard() ? u.hmin : u.min) > 70 ? '<span class="dot"></span>' : ''}</button>`;
       if (!keepTune) {
-        this._$('.tunewrap').innerHTML = u.tune ? `<div class="panel tune">
-          <label><span>Minimum confidence</span><output>${u.min}%</output></label>
-          <input type="range" name="min" min="50" max="99" step="1" value="${u.min}" aria-label="Minimum confidence">
+        const sliders = this._isBoth() ? [['min', 'Minimum confidence, sightings'], ['hmin', 'Minimum confidence, calls']]
+          : this._isHeard() ? [['hmin', 'Minimum confidence, calls']] : [['min', 'Minimum confidence']];
+        this._$('.tunewrap').innerHTML = u.tune ? `<div class="panel tune">${sliders.map(([n, l]) => `
+          <label><span>${l}</span><output data-for="${n}">${u[n]}%</output></label>
+          <input type="range" name="${n}" min="50" max="99" step="1" value="${u[n]}" aria-label="${l}">`).join('')}
           <small class="hid"></small></div>` : '';
       }
       const hid = this._$('.hid'); if (hid) { const n = this._hidden(); hid.textContent = n ? `Hiding ${n} lower-confidence ${this._word(n)} from every view.` : 'Nothing is hidden at this setting.'; }
@@ -1299,10 +1318,48 @@
       }).join('');
       const more = list.length > u.limit ? `<button class="more" data-act="more">+${list.length - u.limit} more</button>` : '';
       const cut = heard && this._hCut ? ` · newest ${HEARD_PAGE * HEARD_PAGES} read` : '';
+      /* A redraw would cut off whatever is playing. A stage that is playing
+         the same thing as before is lifted out and put back as it is; a media
+         element moved within one task carries on. */
+      const old = this._$('.stagewrap')?.firstElementChild;
+      const at = list.findIndex((e) => e.id === u.cur);
+      const keep = old && at >= 0 && this._staged === this._stageKey() && this._playing() ? old : null;
+      if (!keep) old?.querySelector('video')?._hls?.destroy();
       this._$('.browser').innerHTML = `<div class="sub"><h3>${list.length} ${this._word(list.length)}${chips.length ? '' : ` · last ${u.days} days`}${cut}</h3></div>${chipHtml}
         <div class="stagewrap"></div>
         ${list.length ? `<div class="film">${shots}${more}</div>` : `<div class="empty">No ${this._word(2)} match. Try a longer range or a lower confidence filter.</div>`}`;
+      if (keep) {
+        this._$('.stagewrap').appendChild(keep);
+        const pos = keep.querySelector('.pos'); if (pos) pos.textContent = `${at + 1} / ${list.length}`;
+        return;
+      }
       this._stage();
+    }
+    _stageKey() { return `${this._ui.src}|${this._ui.cur}|${this._ui.clip}`; }
+
+    /* The spectrogram is the whole recording, edge to edge, so a line across
+       it at the fraction played shows where the sound is; the browser's own
+       progress bar is inset and cannot. A click on it plays from there. */
+    _playhead(audio, type) {
+      const head = audio.closest('.stage')?.querySelector('.playhead'); if (!head) return;
+      const d = audio.duration;
+      head.style.left = `${(d > 0 && Number.isFinite(d) ? Math.min(1, audio.currentTime / d) : 0) * 100}%`;
+      head.style.opacity = audio.currentTime > 0 || !audio.paused ? '1' : '0';
+      if (type === 'play') {
+        const step = () => { if (!audio.isConnected || audio.paused || audio.ended) return; this._playhead(audio); requestAnimationFrame(step); };
+        requestAnimationFrame(step);
+      }
+    }
+    _seek(el, ev) {
+      const audio = el.closest('.stage')?.querySelector('audio'); if (!audio) return;
+      const r = el.getBoundingClientRect(); if (!r.width) return;
+      const f = Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width));
+      const go = () => { audio.currentTime = Math.min(f * audio.duration, Math.max(0, audio.duration - 0.05)); this._playhead(audio); };
+      if (audio.duration > 0 && Number.isFinite(audio.duration)) go(); else audio.addEventListener('loadedmetadata', go, { once: true });
+      audio.play()?.catch(() => {});
+    }
+    _repeat() {
+      return `<button class="pill ghost" data-act="loop" aria-pressed="${this._ui.loop}" title="Repeat" aria-label="Repeat">${svg('repeat')}</button>`;
     }
 
     _stage() {
@@ -1311,13 +1368,14 @@
       const list = this._list || []; const i = list.findIndex((e) => e.id === this._ui.cur);
       if (i < 0) { wrap.innerHTML = ''; return; }
       const e = list[i];
+      this._staged = this._stageKey();
       if (e.heard) { this._stageHeard(wrap, list, i); return; }
       const still = e.snap ? this._media(e.id, 'snapshot.jpg') : this._thumb(e);
       const frig = this._frigateHere() ? '' : this._frigateLink(e.id);
       const away = this._signed(e);
       const pad = this._ui.clip && e.clip ? this._clipPaths(e) : null;
       const media = this._ui.clip && e.clip
-        ? `<video class="media" controls playsinline muted preload="metadata" poster="${esc(still)}"${pad ? ` data-vod-hls="${esc(pad.hls)}" data-vod-mp4="${esc(pad.mp4)}"` : ''} data-hls="${esc(this._media(e.id, 'index.m3u8'))}" data-mp4="${esc(this._media(e.id, 'clip.mp4'))}"></video>`
+        ? `<video class="media" controls playsinline muted${this._ui.loop ? ' loop' : ''} preload="metadata" poster="${esc(still)}"${pad ? ` data-vod-hls="${esc(pad.hls)}" data-vod-mp4="${esc(pad.mp4)}"` : ''} data-hls="${esc(this._media(e.id, 'index.m3u8'))}" data-mp4="${esc(this._media(e.id, 'clip.mp4'))}"></video>`
         : `<img class="media" alt="${esc(this._name(e))}" data-id="${esc(e.id)}" data-kind="${e.snap ? 'snapshot' : 'thumbnail'}" src="${esc(still)}">`;
       /* The call that goes with this sighting, when there is one. Its recording
          comes through the same ingress session as the rest of what is heard. */
@@ -1328,7 +1386,13 @@
           this._restaged = e.id;
           this._bnBase(true).then(() => { if (this._ui.cur === e.id) this._stage(); }).catch(() => {});
         }
-        also = `<div class="also">${fresh && m.clip ? `<audio class="player" controls preload="none" data-heard src="${esc(this._bnMedia('audio', m))}"></audio>` : ''}
+        const ref = fresh ? this._bnMedia('species', m) : '';
+        /* The sound, drawn, with BirdNET-Go's picture of the species it named:
+           the bird the camera caught can be set against the one the
+           microphone claims. */
+        const strip = fresh && m.clip ? `<div class="strip">${ref ? `<img class="ref" alt="${esc(m.spName)}" title="${esc(m.spName)}" data-heard src="${esc(ref)}">` : ''}
+          <div class="sg" data-seek title="Play from here"><img class="stripimg" alt="Spectrogram of ${esc(m.spName)}" data-heard src="${esc(this._bnMedia('spectrogram', m))}"><i class="playhead"></i></div></div>` : '';
+        also = `<div class="also">${strip}${fresh && m.clip ? `<audio class="player" controls preload="none"${this._ui.loop ? ' loop' : ''} data-heard src="${esc(this._bnMedia('audio', m))}"></audio>` : ''}
           <div class="note">Heard ${esc(this._timing(e, m))}: <b>${esc(m.spName)}</b> · ${Math.round(m.score * 100)}% · ${esc(pretty(m.cam))} microphone${m.clip ? '' : ' · recording no longer kept'}</div></div>`;
       }
       const dur = e.end ? Math.max(1, Math.round(e.end - e.start)) : null;
@@ -1340,6 +1404,7 @@
         <span class="pos">${i + 1} / ${list.length}</span>${also}
         <div class="cap"><div class="t"><div class="p">${esc(this._name(e))}</div><div class="s">${esc([this._when(e.start), ...meta].join(' · '))}</div></div>
           ${e.clip ? (this._ui.clip ? `<button class="pill" data-act="still">${svg('image')}Photo</button>` : `<button class="pill" data-act="clip">${svg('play')}Video</button>`) : ''}
+          ${(this._ui.clip && e.clip) || (m && m.clip) ? this._repeat() : ''}
           ${this._frigateHere()
             ? `<button class="pill ghost" data-act="frigate" title="Open Frigate" aria-label="Open Frigate">${svg('find')}</button>`
             : frig ? `<a class="pill ghost" target="_blank" rel="noopener" href="${esc(frig)}" title="Open this sighting in Frigate" aria-label="Open this sighting in Frigate">${svg('find')}</a>` : ''}
@@ -1369,14 +1434,15 @@
          as it does for Frigate, so the link is only offered where it works. */
       const away = this._cfg.birdnet.addon && !this._cfg.birdnet.url && (/Home Assistant\//.test(navigator.userAgent) || !!window.externalApp || !!window.webkit?.messageHandlers?.externalBus)
         ? '' : this._bnMedia('page', e);
-      wrap.innerHTML = `<div class="stage heard"><div class="shotwrap">
-          <img class="media spec" alt="Spectrogram of ${esc(e.spName)}" data-heard src="${esc(this._bnMedia('spectrogram', e))}">
+      wrap.innerHTML = `<div class="stage heard"><div class="shotwrap"${e.clip ? ' data-seek title="Play from here"' : ''}>
+          <img class="media spec" alt="Spectrogram of ${esc(e.spName)}" data-heard src="${esc(this._bnMedia('spectrogram', e))}"><i class="playhead"></i>
           <button class="nav l" data-act="step" data-v="-1" aria-label="Newer" ${i === 0 ? 'disabled' : ''}>${svg('left')}</button>
           <button class="nav r" data-act="step" data-v="1" aria-label="Older" ${i >= list.length - 1 ? 'disabled' : ''}>${svg('right')}</button>
           <button class="x" data-act="close" aria-label="Close">${svg('close')}</button>
           <span class="pos">${i + 1} / ${list.length}</span></div>
-        ${e.clip ? `<audio class="player" controls preload="none" data-heard src="${esc(this._bnMedia('audio', e))}"></audio>` : '<div class="note">BirdNET-Go no longer keeps this recording.</div>'}
+        ${e.clip ? `<audio class="player" controls preload="none"${this._ui.loop ? ' loop' : ''} data-heard src="${esc(this._bnMedia('audio', e))}"></audio>` : '<div class="note">BirdNET-Go no longer keeps this recording.</div>'}
         <div class="cap"><div class="t"><div class="p">${esc(e.spName)}${sci ? ` <i style="font-weight:400;opacity:.7">${esc(sci)}</i>` : ''}</div><div class="s">${esc(meta.join(' · '))}</div></div>
+          ${e.clip ? this._repeat() : ''}
           ${away ? `<a class="pill ghost" target="_blank" rel="noopener" href="${esc(away)}" title="Open this detection in BirdNET-Go" aria-label="Open this detection in BirdNET-Go">${svg('open')}</a>` : ''}
         </div></div>`;
       this._root.querySelectorAll('.shot').forEach((b) => b.setAttribute('aria-current', String(+b.dataset.i === i)));
@@ -1387,6 +1453,7 @@
        drawn, or a recording that will not play, says so in its place. */
     _heardFallback(el) {
       if (el.tagName === 'AUDIO') { el.insertAdjacentHTML('afterend', '<div class="note">This recording could not be played here.</div>'); el.remove(); return; }
+      if (el.classList.contains('stripimg')) { el.closest('.sg').remove(); return; }
       if (el.classList.contains('spec')) { el.insertAdjacentHTML('afterend', '<div class="fail"><p>No spectrogram for this detection.</p><small>BirdNET-Go draws one only while it still has the recording.</small></div>'); }
       el.remove();
     }
@@ -1489,11 +1556,18 @@
     }
 
     _click(ev) {
-      const b = ev.target.closest('[data-act]'); if (!b || !this._root.contains(b)) return;
+      const b = ev.target.closest('[data-act]');
+      if (!b) { const s = ev.target.closest('[data-seek]'); if (s && this._root.contains(s)) this._seek(s, ev); return; }
+      if (!this._root.contains(b)) return;
       const u = this._ui; const v = b.dataset.v; let refetch = false; let stageOnly = false;
       switch (b.dataset.act) {
         case 'days': u.days = +v; u.cell = null; u.cur = null; refetch = true; break;
         case 'tune': u.tune = !u.tune; break;
+        case 'loop':
+          u.loop = !u.loop; this._save();
+          this._root.querySelectorAll('.stage video, .stage audio').forEach((m) => { m.loop = u.loop; });
+          b.setAttribute('aria-pressed', String(u.loop));
+          return;
         case 'src': if (u.src === v) return; u.src = v; u.sp = null; u.cell = null; u.cur = null; u.limit = 60; u.allRows = false; break;
         case 'allrows': u.allRows = true; break;
         case 'view': u.view = v; u.cell = null; u.cur = null; break;
@@ -1550,6 +1624,7 @@
     clip_lead_out: ['Clip lead-out', 'Extra seconds after a sighting when playing a clip (uses Frigate recordings).'],
     birdnet_addon: ['BirdNET-Go add-on', 'Its slug, for a BirdNET-Go running as an add-on. Adds a Seen / Heard switch with the calls it has identified.'],
     birdnet_url: ['BirdNET-Go address', 'For a BirdNET-Go that is not an add-on, e.g. http://192.168.1.10:8080. Used in preference to the slug.'],
+    heard_min_score: ['Opening confidence, heard', 'Calls below this are hidden until you move the slider on the card. The same as for sightings unless set.'],
     heard_ignore: ['Heard labels to leave out', 'Besides engines, voices, sirens and dogs, which are always left out.'],
     correlate: ['Seen and heard together', 'Pair a sighting with a call of the same kind of animal, from the microphone named as its camera, at the same time. Adds Both to the switch.'],
     correlate_window: ['Same-time window', 'Seconds before or after a sighting that a call may fall. 120 unless set.'],
@@ -1602,6 +1677,7 @@
         { name: 'birdnet_url', selector: { text: {} } },
       ] },
       ...(birdnet ? [
+        { name: 'heard_min_score', selector: { number: { min: 50, max: 99, step: 1, mode: 'slider', unit_of_measurement: '%' } } },
         { name: 'heard_ignore', selector: { select: { multiple: true, custom_value: true, mode: 'dropdown', options: [] } } },
         { type: 'grid', name: '', schema: [
           { name: 'correlate', selector: { boolean: {} } },
@@ -1669,6 +1745,7 @@
         ignore_labels: Array.isArray(c.ignore_labels) ? c.ignore_labels : [],
         heard_ignore: Array.isArray(c.heard_ignore) ? c.heard_ignore : [],
         correlate: !!c.correlate,
+        heard_min_score: +c.heard_min_score || +c.min_score || DEFAULTS.min_score,
       };
     }
 
@@ -1694,6 +1771,8 @@
       if (!Array.isArray(config.ignore_labels) || !config.ignore_labels.length) delete config.ignore_labels;
       if (!Array.isArray(config.heard_ignore) || !config.heard_ignore.length) delete config.heard_ignore;
       if (!config.correlate) delete config.correlate;
+      /* Unset, it follows the sightings' threshold, so it is only written when it differs. */
+      if (!(+config.heard_min_score > 0) || (!('heard_min_score' in (this._config || {})) && +config.heard_min_score === +config.min_score)) delete config.heard_min_score;
       if (!(+config.correlate_window > 0)) delete config.correlate_window;
       /* An emptied field should leave no key behind. */
       for (const k of ['frigate_addon', 'frigate_url', 'birdnet_addon', 'birdnet_url', 'clip_lead_in', 'clip_lead_out']) {
