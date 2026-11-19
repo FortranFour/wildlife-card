@@ -1,39 +1,17 @@
 # Changelog
 
-## 1.5.0-beta.6 — 2026-11-18
+## 1.5.0 — 2026-11-19
 
-- **A video's play and pause work again where a call is shown under it.** The previous and next arrows were placed against the whole stage, and the rows added under the picture pushed the left one down onto the video's own play button, where it swallowed the clicks, invisibly when it was disabled. The arrows are now placed against the picture alone.
-- **Over a video, the close button and counter sit in a band above the picture.** On the iPhone they lay on the player's own mute and full-screen buttons, which are in the top corners there.
-- **Clips start with their sound on.** If the browser will not allow that, the clip starts muted rather than not at all. Muting a video yourself is remembered for the next one.
-
-## 1.5.0-beta.5 — 2026-11-18
-
-- **A playhead on the spectrogram.** A line crosses the spectrogram at the point being played, since the browser's own progress bar is inset and cannot line up with the picture. A click on the spectrogram plays from there.
-- **Repeat.** A button on the stage loops a recording or a sighting's video. The setting is remembered.
-- **A confidence threshold of their own for calls.** `heard_min_score` sets where it opens (the sightings' value unless set), the Heard side's slider moves it, and Both shows a slider for each side.
-- **In Both, the call is drawn under the picture.** A paired sighting shows the call's spectrogram, with its playhead, beside BirdNET-Go's picture of the species it named. It stays there while the sighting's video plays.
-- **A background refresh no longer waits for, or cuts off, what is playing.** The card is redrawn around a stage that is playing.
-
-## 1.5.0-beta.4 — 2026-11-18
-
-- **Leaving dogs out of discovery no longer switches off the coyote inference.** With species discovered automatically and `dog` in `ignore_labels`, dogs were dropped from the request to Frigate, so no night-time dog was ever weighed as a likely coyote. They are now asked for separately on the coyote cameras.
-
-## 1.5.0-beta.3 — 2026-11-18
-
-- **"Discover species automatically" is always in the visual editor.** It used to be left out when a `species` list was written in YAML. Over a list it now sets `discover: true`, which makes the card discover species while the list stays in the YAML, and turning it off puts the list back in force. Without a list it writes `species: auto` as before.
-
-## 1.5.0-beta.2 — 2026-11-18
-
-- **Seen and heard together.** With `correlate: true`, a sighting is paired with a call of the same kind of animal, from the microphone that has its camera's name, within `correlate_window` seconds (120 unless set). The switch gains **Both**, which shows only paired sightings, names what was heard on each, and plays the recording under the picture. Paired sightings are marked on the Seen side, and a call that was also seen says so on the Heard side. Both options are in the visual editor.
-- The heard side has now run against a live BirdNET-Go add-on.
-
-## 1.5.0-beta.1 — 2026-11-17
-
-- **Animals you hear.** With `birdnet_addon` or `birdnet_url` set, a Seen / Heard switch adds the bird and other animal calls identified by BirdNET-Go: tiles for the commonest callers, the grid by species, time of day or microphone, and a browser that opens each detection on its spectrogram with the recording under it. The headline reports newcomers, callers above or below their usual rate, the busiest hours and what calls after dark. Nothing changes for a card without either option.
+- **Animals you hear.** With `birdnet_addon` or `birdnet_url` set, a Seen / Heard switch adds the bird and other animal calls identified by [BirdNET-Go](https://github.com/tphakala/birdnet-go): tiles for the commonest callers with its species pictures, the grid by species, time of day or microphone, and a browser that opens each detection on its spectrogram with the recording under it. The headline reports newcomers, callers above or below their usual rate, the busiest hours and what calls after dark. An add-on is read through ingress, so it needs no address of its own; viewers who may not open it get the card without the switch. Nothing changes for a card without either option.
+- **A playhead on the spectrogram.** A line crosses the spectrogram at the point being played, and a click on the spectrogram plays from there.
+- **Seen and heard together.** With `correlate: true`, a sighting is paired with a call of the same kind of animal, from the microphone that has its camera's name, within `correlate_window` seconds (120 unless set). The switch gains **Both**, which shows only paired sightings, with the call's spectrogram and recording under the camera picture beside BirdNET-Go's picture of the species it named. Paired sightings are marked on the Seen side.
+- **A confidence threshold of their own for calls.** `heard_min_score` sets where it opens, the Heard side's slider moves it, and Both shows a slider for each side. `heard_ignore` leaves heard labels out by common or scientific name; BirdNET's classes that are not animals, and dogs, are always left out.
 - **A coyote that is heard** leads the Heard headline and is noted on the Seen side, beside the cameras' own inference.
-- **`heard_ignore`** leaves heard labels out by common or scientific name. BirdNET's classes that are not animals (engines, voices, sirens and so on) and dogs are always left out.
-- **An add-on's BirdNET-Go is read through ingress**, so it needs no address of its own and works over https. Viewers who may not open the add-on get the card without the switch.
-- **A refresh no longer cuts off a clip or a recording that is playing.** The background refresh waits until it has finished.
+- **Repeat, and sound.** A button on the stage loops a recording or a sighting's video, and is remembered. Clips now start with their sound on, falling back to muted where the browser insists; muting a video yourself is remembered for the next one.
+- **"Discover species automatically" is always in the visual editor.** Over a `species` list written in YAML it sets `discover: true`, which discovers species while the list stays in the YAML, and turning it off puts the list back in force.
+- **Leaving dogs out of discovery no longer switches off the coyote inference.** With `dog` in `ignore_labels`, dogs were dropped from the request to Frigate, so none was ever weighed as a likely coyote.
+- **Over a video, the close button and counter sit in a band above the picture**, clear of the player's own controls, which on the iPhone are in the top corners.
+- **A background refresh no longer cuts off a clip or recording that is playing.** The card is redrawn around it.
 
 ## 1.4.0 — 2026-11-15
 
